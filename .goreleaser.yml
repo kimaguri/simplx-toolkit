@@ -38,7 +38,7 @@ homebrew_casks:
   - name: local
     repository:
       owner: kimaguri
-      name: homebrew-tap
+      name: homebrew-simplx-toolkit
       token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
     directory: Casks
     url:
