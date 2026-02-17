@@ -1,0 +1,7 @@
+# Binary
+local
+!cmd/local/
+
+# IDE / tools
+.claude/
+dist/

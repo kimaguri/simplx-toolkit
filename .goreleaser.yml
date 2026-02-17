@@ -1,0 +1,53 @@
+version: 2
+
+project_name: local
+
+builds:
+  - id: local
+    main: ./cmd/local
+    binary: local
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w -X main.version={{.Version}} -X main.commit={{.Commit}}
+
+archives:
+  - id: default
+    format: tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^ci:"
+
+brews:
+  - repository:
+      owner: kimaguri
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    directory: Formula
+    homepage: "https://github.com/kimaguri/simplx-toolkit"
+    description: "Dev process dashboard TUI — launch, monitor, and manage local dev services"
+    license: "MIT"
+    install: |
+      bin.install "local"
+    test: |
+      assert_match "Dev Process Dashboard", shell_output("#{bin}/local --help")
+
+release:
+  github:
+    owner: kimaguri
+    name: simplx-toolkit
