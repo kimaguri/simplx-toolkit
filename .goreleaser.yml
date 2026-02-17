@@ -1,11 +1,11 @@
 version: 2
 
-project_name: local
+project_name: devdash
 
 builds:
-  - id: local
+  - id: devdash
     main: ./cmd/local
-    binary: local
+    binary: devdash
     env:
       - CGO_ENABLED=0
     goos:
@@ -35,7 +35,7 @@ changelog:
       - "^ci:"
 
 homebrew_casks:
-  - name: local
+  - name: devdash
     repository:
       owner: kimaguri
       name: homebrew-simplx-toolkit

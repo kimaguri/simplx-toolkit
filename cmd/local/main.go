@@ -24,7 +24,7 @@ func main() {
 			os.Exit(0)
 		}
 		if arg == "--version" || arg == "-v" {
-			fmt.Printf("local %s (%s)\n", version, commit)
+			fmt.Printf("devdash %s (%s)\n", version, commit)
 			os.Exit(0)
 		}
 	}
@@ -62,11 +62,11 @@ func main() {
 
 // printUsage displays help information
 func printUsage() {
-	fmt.Println(`local - Dev Process Dashboard
+	fmt.Println(`devdash - Dev Process Dashboard
 
 Usage:
-  local              Start the TUI dashboard
-  local --help       Show this help message
+  devdash              Start the TUI dashboard
+  devdash --help       Show this help message
 
 Keyboard shortcuts:
   n          Launch new process
@@ -91,5 +91,5 @@ On first run, the settings overlay opens automatically.
 Add scan directories pointing to your worktree parent directories.
 
 Processes are spawned in the background and persist after quitting.
-Re-running 'local' will reconnect to existing processes.`)
+Re-running 'devdash' will reconnect to existing processes.`)
 }
