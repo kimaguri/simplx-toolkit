@@ -19,7 +19,8 @@ builds:
 
 archives:
   - id: default
-    format: tar.gz
+    formats:
+      - tar.gz
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
 
 checksum:
@@ -33,19 +34,17 @@ changelog:
       - "^test:"
       - "^ci:"
 
-brews:
-  - repository:
+homebrew_casks:
+  - name: local
+    repository:
       owner: kimaguri
       name: homebrew-tap
       token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
-    directory: Formula
+    directory: Casks
+    url:
+      verified: github.com/kimaguri/simplx-toolkit
     homepage: "https://github.com/kimaguri/simplx-toolkit"
     description: "Dev process dashboard TUI — launch, monitor, and manage local dev services"
-    license: "MIT"
-    install: |
-      bin.install "local"
-    test: |
-      assert_match "Dev Process Dashboard", shell_output("#{bin}/local --help")
 
 release:
   github:
