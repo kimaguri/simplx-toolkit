@@ -34,17 +34,17 @@ changelog:
       - "^test:"
       - "^ci:"
 
-homebrew_casks:
+brews:
   - name: devdash
     repository:
       owner: kimaguri
       name: homebrew-simplx-toolkit
       token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
-    directory: Casks
-    url:
-      verified: github.com/kimaguri/simplx-toolkit
+    directory: Formula
     homepage: "https://github.com/kimaguri/simplx-toolkit"
     description: "Dev process dashboard TUI — launch, monitor, and manage local dev services"
+    install: |
+      bin.install "devdash"
 
 release:
   github:

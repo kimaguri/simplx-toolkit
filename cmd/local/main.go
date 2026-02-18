@@ -72,6 +72,8 @@ Keyboard shortcuts:
   n          Launch new process
   k          Kill selected process
   r          Restart selected process
+  t          Toggle Cloudflare tunnel (requires cloudflared)
+  u          Copy tunnel URL
   s          Settings (manage scan directories)
   Enter      Fullscreen log view
   Tab        Switch focus (list / logs)

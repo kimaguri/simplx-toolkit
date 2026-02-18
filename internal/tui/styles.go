@@ -147,3 +147,7 @@ var searchCountStyle = lipgloss.NewStyle().
 var searchPromptStyle = lipgloss.NewStyle().
 	Foreground(colorYellow).
 	Bold(true)
+
+// Tunnel URL style — cyan for active tunnel URLs
+var tunnelURLStyle = lipgloss.NewStyle().
+	Foreground(lipgloss.Color("#00CCCC"))

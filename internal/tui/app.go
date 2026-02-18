@@ -30,6 +30,7 @@ const (
 	overlayLauncher
 	overlayConfirm
 	overlaySettings
+	overlayTunnel
 )
 
 // ProcessStatusMsg is sent periodically to refresh process list statuses
@@ -46,10 +47,12 @@ type App struct {
 	launcher      launcherModel
 	confirm       confirmModel
 	settings      settingsModel
+	tunnelOvl     tunnelOverlayModel
 	width         int
 	height        int
-	worktrees     []discovery.Worktree
-	pendingLaunch *LaunchRequestMsg // stored while waiting for deps install confirmation
+	worktrees      []discovery.Worktree
+	pendingLaunch  *LaunchRequestMsg // stored while waiting for deps install confirmation
+	pendingTunnel  string            // process name waiting for cloudflared install
 }
 
 // NewApp creates the root application model
@@ -115,6 +118,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.launcher.SetSize(msg.Width, msg.Height)
 		a.confirm.SetSize(msg.Width, msg.Height)
 		a.settings.SetSize(msg.Width, msg.Height)
+		a.tunnelOvl.SetSize(msg.Width, msg.Height)
 
 		if a.view == viewLogFull {
 			a.logView.SetSize(msg.Width, msg.Height)
@@ -165,7 +169,15 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				pmPath := resolveBinary(pmBin)
 				return a, installDeps(msg.Target, pmPath)
+			case "stop-tunnel":
+				return a, stopTunnelCmd(a.pm, msg.Target)
+			case "install-cloudflared":
+				a.dashboard.tunnelFeedback = "Installing cloudflared..."
+				return a, installCloudflaredCmd()
 			}
+		} else if msg.Action == "install-cloudflared" {
+			a.pendingTunnel = ""
+			return a, nil
 		} else if msg.Action == "install-deps" {
 			// User declined install — launch anyway
 			if a.pendingLaunch != nil {
@@ -296,6 +308,71 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.dashboard.SetProcesses(a.pm.List())
 		return a, nil
 
+	case tunnelStartedMsg:
+		a.dashboard.SetProcesses(a.pm.List())
+		// Update overlay to show URL
+		if a.overlay == overlayTunnel {
+			a.tunnelOvl.phase = tunnelPhaseActive
+			a.tunnelOvl.url = msg.url
+		}
+		return a, nil
+
+	case tunnelStoppedMsg:
+		a.dashboard.SetProcesses(a.pm.List())
+		return a, func() tea.Msg {
+			return tunnelFeedbackMsg{message: "[Tunnel stopped]"}
+		}
+
+	case tunnelErrorMsg:
+		a.dashboard.SetProcesses(a.pm.List())
+		// Update overlay to show error
+		if a.overlay == overlayTunnel {
+			a.tunnelOvl.phase = tunnelPhaseError
+			a.tunnelOvl.errMsg = msg.err.Error()
+			return a, nil
+		}
+		return a, func() tea.Msg {
+			return tunnelFeedbackMsg{message: fmt.Sprintf("[Tunnel error: %v]", msg.err)}
+		}
+
+	case tunnelOverlayClosedMsg:
+		a.overlay = overlayNone
+		return a, nil
+
+	case cloudflaredMissingMsg:
+		a.overlay = overlayNone // close tunnel overlay
+		a.pendingTunnel = msg.name
+		confirmText := "cloudflared not found.\nInstall via Homebrew?"
+		a.confirm = newConfirmModel(confirmText, "install-cloudflared", msg.name)
+		a.confirm.SetSize(a.width, a.height)
+		a.overlay = overlayConfirm
+		return a, nil
+
+	case cloudflaredInstalledMsg:
+		if msg.err != "" {
+			a.pendingTunnel = ""
+			a.dashboard.tunnelFeedback = ""
+			return a, func() tea.Msg {
+				return tunnelFeedbackMsg{message: "[Install failed]"}
+			}
+		}
+		// Install succeeded — open tunnel overlay and start tunnel
+		name := a.pendingTunnel
+		a.pendingTunnel = ""
+		a.dashboard.tunnelFeedback = ""
+		if name != "" {
+			a.tunnelOvl = newTunnelOverlay(name)
+			a.tunnelOvl.SetSize(a.width, a.height)
+			a.overlay = overlayTunnel
+			return a, startTunnelCmd(a.pm, name)
+		}
+		return a, nil
+
+	case tunnelFeedbackMsg, clearTunnelFeedbackMsg:
+		var cmd tea.Cmd
+		a.dashboard, cmd = a.dashboard.Update(msg)
+		return a, cmd
+
 	case interactiveTickMsg:
 		switch a.view {
 		case viewDashboard:
@@ -343,6 +420,10 @@ func (a App) updateOverlay(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case overlaySettings:
 		var cmd tea.Cmd
 		a.settings, cmd = a.settings.Update(msg)
+		return a, cmd
+	case overlayTunnel:
+		var cmd tea.Cmd
+		a.tunnelOvl, cmd = a.tunnelOvl.Update(msg)
 		return a, cmd
 	}
 	return a, nil
@@ -426,6 +507,30 @@ func (a App) updateDashboardKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			a.confirm = newConfirmModel(msg, "restart", sel.Info.Name)
 			a.confirm.SetSize(a.width, a.height)
 			a.overlay = overlayConfirm
+		}
+		return a, nil
+
+	case "t":
+		sel := a.dashboard.SelectedProcess()
+		if sel == nil || sel.Status != process.StatusRunning {
+			return a, nil
+		}
+		if sel.Tunnel != nil && sel.Tunnel.Status != process.TunnelOff {
+			confirmText := fmt.Sprintf("Stop tunnel for %q?", sel.Info.Name)
+			a.confirm = newConfirmModel(confirmText, "stop-tunnel", sel.Info.Name)
+			a.confirm.SetSize(a.width, a.height)
+			a.overlay = overlayConfirm
+			return a, nil
+		}
+		a.tunnelOvl = newTunnelOverlay(sel.Info.Name)
+		a.tunnelOvl.SetSize(a.width, a.height)
+		a.overlay = overlayTunnel
+		return a, startTunnelCmd(a.pm, sel.Info.Name)
+
+	case "u":
+		sel := a.dashboard.SelectedProcess()
+		if sel != nil && sel.Tunnel != nil && sel.Tunnel.URL != "" {
+			return a, copyTunnelURL(sel.Tunnel.URL)
 		}
 		return a, nil
 
@@ -535,6 +640,8 @@ func (a App) View() string {
 		return a.confirm.View()
 	case overlaySettings:
 		return a.settings.View()
+	case overlayTunnel:
+		return a.tunnelOvl.View()
 	}
 
 	return base

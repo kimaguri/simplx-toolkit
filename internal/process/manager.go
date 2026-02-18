@@ -43,6 +43,7 @@ type RunningProcess struct {
 	StartedAt time.Time
 	PtyFile   *os.File      // PTY master fd (nil for reconnected processes)
 	VTerm     *VTermScreen  // Virtual terminal screen (nil for reconnected)
+	Tunnel    *TunnelInfo   // Cloudflare tunnel (nil if none)
 	done      chan struct{}  // closed when process exits (by waitForExit)
 	tailStop  chan struct{}  // closed to stop the tail goroutine
 	logFile   *os.File      // log file handle (for started processes)
@@ -165,6 +166,12 @@ func (pm *ProcessManager) waitForExit(name string, cmd *exec.Cmd, logFile *os.Fi
 		return
 	}
 
+	// Stop tunnel if process exits on its own
+	if rp.Tunnel != nil {
+		StopTunnel(rp.Tunnel)
+		rp.Tunnel = nil
+	}
+
 	if err != nil {
 		rp.Status = StatusError
 		rp.LogBuf.Write([]byte(fmt.Sprintf("\n[process exited with error: %v]\n", err)))
@@ -184,6 +191,12 @@ func (pm *ProcessManager) Stop(name string) error {
 		return fmt.Errorf("process %q not found", name)
 	}
 	pm.mu.Unlock()
+
+	// Stop tunnel before killing the process
+	if rp.Tunnel != nil {
+		StopTunnel(rp.Tunnel)
+		rp.Tunnel = nil
+	}
 
 	if rp.Status == StatusRunning && rp.Cmd != nil && rp.Cmd.Process != nil {
 		pgid, err := syscall.Getpgid(rp.Cmd.Process.Pid)
@@ -363,6 +376,48 @@ func (pm *ProcessManager) ResizePTY(name string, rows, cols uint16) error {
 	if rp.VTerm != nil {
 		rp.VTerm.Resize(int(rows), int(cols))
 	}
+	return nil
+}
+
+// StartTunnel opens a Cloudflare Quick Tunnel for a running process
+func (pm *ProcessManager) StartTunnel(name string) (*TunnelInfo, error) {
+	pm.mu.Lock()
+	defer pm.mu.Unlock()
+
+	rp, exists := pm.processes[name]
+	if !exists {
+		return nil, fmt.Errorf("process %q not found", name)
+	}
+	if rp.Status != StatusRunning {
+		return nil, fmt.Errorf("process %q is not running", name)
+	}
+	if rp.Tunnel != nil && rp.Tunnel.Status != TunnelOff {
+		return nil, fmt.Errorf("tunnel already active for %q", name)
+	}
+
+	ti, err := StartTunnel(rp.Info.Port)
+	if err != nil {
+		return nil, err
+	}
+	rp.Tunnel = ti
+	return ti, nil
+}
+
+// StopProcessTunnel stops the Cloudflare tunnel for a process
+func (pm *ProcessManager) StopProcessTunnel(name string) error {
+	pm.mu.Lock()
+	defer pm.mu.Unlock()
+
+	rp, exists := pm.processes[name]
+	if !exists {
+		return fmt.Errorf("process %q not found", name)
+	}
+	if rp.Tunnel == nil {
+		return fmt.Errorf("no tunnel for %q", name)
+	}
+
+	StopTunnel(rp.Tunnel)
+	rp.Tunnel = nil
 	return nil
 }
 

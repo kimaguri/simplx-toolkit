@@ -1,5 +1,6 @@
 # Binary
-devdash
+/devdash
+/local
 
 # IDE / tools
 .claude/

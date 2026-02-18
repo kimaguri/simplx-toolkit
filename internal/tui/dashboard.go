@@ -35,10 +35,11 @@ type dashboardModel struct {
 	logSubName    string
 	logBuf        *process.LogBuffer
 	autoScroll    bool
-	clipboardMsg  string
-	search        searchModel
-	selection     selectionModel
-	isInteractive bool // interactive mode active (keys → PTY)
+	clipboardMsg    string
+	tunnelFeedback  string
+	search          searchModel
+	selection       selectionModel
+	isInteractive   bool // interactive mode active (keys → PTY)
 }
 
 // newDashboardModel creates a new dashboard
@@ -126,6 +127,14 @@ func (m dashboardModel) Update(msg tea.Msg) (dashboardModel, tea.Cmd) {
 
 	case ClearClipboardFeedbackMsg:
 		m.clipboardMsg = ""
+		return m, nil
+
+	case tunnelFeedbackMsg:
+		m.tunnelFeedback = msg.message
+		return m, tunnelFeedbackTimeout()
+
+	case clearTunnelFeedbackMsg:
+		m.tunnelFeedback = ""
 		return m, nil
 
 	case tea.WindowSizeMsg:
@@ -463,7 +472,11 @@ func (m dashboardModel) renderSessionList(w, h int) string {
 		lines = append(lines, dimStyle.Render("Press n to launch"))
 	} else {
 		for i, rp := range m.processes {
-			lines = append(lines, m.renderSessionItem(i, rp, innerW))
+			item := m.renderSessionItem(i, rp, innerW)
+			// Item may contain multiple lines (e.g. tunnel info)
+			for _, l := range strings.Split(item, "\n") {
+				lines = append(lines, l)
+			}
 		}
 	}
 
@@ -531,6 +544,25 @@ func (m dashboardModel) renderSessionItem(idx int, rp *process.RunningProcess, w
 	// Truncate if too wide (ANSI-safe via lipgloss MaxWidth)
 	if lipgloss.Width(line) > width {
 		line = lipgloss.NewStyle().MaxWidth(width).Render(line)
+	}
+
+	// Tunnel info as second line
+	if rp.Tunnel != nil {
+		var tunnelLine string
+		switch rp.Tunnel.Status {
+		case process.TunnelStarting:
+			tunnelLine = "     " + dimStyle.Render("tunnel: starting...")
+		case process.TunnelActive:
+			tunnelLine = "     " + tunnelURLStyle.Render("tunnel: "+rp.Tunnel.URL)
+		case process.TunnelError:
+			tunnelLine = "     " + statusError.Render("tunnel: error")
+		}
+		if tunnelLine != "" {
+			if lipgloss.Width(tunnelLine) > width {
+				tunnelLine = lipgloss.NewStyle().MaxWidth(width).Render(tunnelLine)
+			}
+			line += "\n" + tunnelLine
+		}
 	}
 
 	return line
@@ -609,10 +641,17 @@ func (m dashboardModel) renderHelpBar() string {
 		{"n", "new"},
 		{"k", "kill"},
 		{"r", "restart"},
+		{"t", "tunnel"},
 		{"enter", "fullscreen"},
 		{"tab", "switch"},
 		{"s", "settings"},
 		{"q", "quit"},
+	}
+
+	// Show copy tunnel URL key when selected process has an active tunnel
+	sel := m.SelectedProcess()
+	if sel != nil && sel.Tunnel != nil && sel.Tunnel.URL != "" {
+		keys = append(keys[:4], append([]struct{ key, desc string }{{"u", "copy url"}}, keys[4:]...)...)
 	}
 
 	// Show copy and search keys when log panel is focused
@@ -646,6 +685,11 @@ func (m dashboardModel) renderHelpBar() string {
 	// Append clipboard feedback if present
 	if m.clipboardMsg != "" {
 		parts = append(parts, helpKeyStyle.Render(m.clipboardMsg))
+	}
+
+	// Append tunnel feedback if present
+	if m.tunnelFeedback != "" {
+		parts = append(parts, helpKeyStyle.Render(m.tunnelFeedback))
 	}
 
 	bar := strings.Join(parts, "  ")
