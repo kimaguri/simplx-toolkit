@@ -272,11 +272,11 @@ func (pm *ProcessManager) Reconnect() []*RunningProcess {
 		logBuf := NewLogBuffer(DefaultMaxLines)
 		tailStop := make(chan struct{})
 
-		// Read previous log content from file
+		// Read previous log content from file (sanitize raw PTY output)
 		logPath := pm.logFilePath(info.Name)
 		var startOffset int64
 		if data, err := os.ReadFile(logPath); err == nil && len(data) > 0 {
-			logBuf.Write(data)
+			logBuf.Write(sanitizeForLog(data))
 			logBuf.Flush()
 			startOffset = int64(len(data))
 		}
@@ -465,9 +465,22 @@ func readPTY(ptyFile *os.File, logFile *os.File, vterm *VTermScreen, logBuf *Log
 	}
 }
 
+// sanitizingWriter wraps an io.Writer and sanitizes raw PTY data before writing.
+type sanitizingWriter struct {
+	w io.Writer
+}
+
+func (sw sanitizingWriter) Write(p []byte) (int, error) {
+	_, err := sw.w.Write(sanitizeForLog(p))
+	return len(p), err
+}
+
 // tailFile reads from a log file starting at offset and writes new content to w.
 // Polls the file for new data until stop is closed.
+// Data is sanitized through sanitizeForLog before writing.
 func tailFile(path string, w io.Writer, startOffset int64, stop <-chan struct{}) {
+	sw := sanitizingWriter{w: w}
+
 	f, err := os.Open(path)
 	if err != nil {
 		// File might not exist yet — wait for it
@@ -500,7 +513,7 @@ func tailFile(path string, w io.Writer, startOffset int64, stop <-chan struct{})
 			for {
 				n, _ := f.Read(buf)
 				if n > 0 {
-					w.Write(buf[:n])
+					sw.Write(buf[:n])
 				}
 				if n == 0 {
 					break
@@ -512,7 +525,7 @@ func tailFile(path string, w io.Writer, startOffset int64, stop <-chan struct{})
 
 		n, err := f.Read(buf)
 		if n > 0 {
-			w.Write(buf[:n])
+			sw.Write(buf[:n])
 		}
 		if err == io.EOF || n == 0 {
 			time.Sleep(100 * time.Millisecond)
