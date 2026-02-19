@@ -50,18 +50,29 @@ func DetectProjects(wt Worktree) []Project {
 	var projects []Project
 	seen := make(map[string]bool)
 
-	// Detect if this is a pnpm workspace
+	// Detect if this is a monorepo workspace (pnpm, yarn, npm, nx, lerna)
 	wsRoot := ""
-	if isPnpmWorkspace(wt.Path) {
+	if isWorkspace(wt.Path) {
 		wsRoot = wt.Path
 	}
 
 	// Check root for Encore project
 	if isEncoreProject(wt.Path) {
+		name := getPkgName(wt.Path)
+		if name == "" {
+			name = filepath.Base(wt.Path)
+		}
+		pm := detectPackageManager(wt.Path)
+		port, fixed := detectConfigPort(wt.Path)
 		projects = append(projects, Project{
-			Name:     filepath.Base(wt.Path),
-			Path:     wt.Path,
-			IsEncore: true,
+			Name:           name,
+			Path:           wt.Path,
+			IsEncore:       true,
+			PkgName:        name,
+			Scripts:        getScripts(wt.Path),
+			PackageManager: pm,
+			DetectedPort:   port,
+			PortFixed:      fixed,
 		})
 		seen[wt.Path] = true
 	}
@@ -85,8 +96,15 @@ func DetectProjects(wt Worktree) []Project {
 		}
 	}
 
-	// Scan 1-2 levels deep
-	scanLevel(wt.Path, wsRoot, &projects, seen, 1, 2)
+	// Scan subdirectories only when appropriate:
+	// - Encore projects are a single unit — never scan their subdirs
+	// - Non-workspace projects with a detected root — don't scan subdirs
+	// - Workspaces (monorepos) without Encore — scan for leaf projects
+	// - No root project detected — scan to find nested projects
+	isEncore := len(projects) > 0 && projects[0].IsEncore
+	if !isEncore && (wsRoot != "" || len(projects) == 0) {
+		scanLevel(wt.Path, wsRoot, &projects, seen, 1, 2)
+	}
 
 	return projects
 }
@@ -142,10 +160,34 @@ func scanLevel(dir, wsRoot string, projects *[]Project, seen map[string]bool, de
 	}
 }
 
-// isPnpmWorkspace checks if the directory has pnpm-workspace.yaml
-func isPnpmWorkspace(dir string) bool {
-	_, err := os.Stat(filepath.Join(dir, "pnpm-workspace.yaml"))
-	return err == nil
+// isWorkspace checks if the directory is a monorepo workspace root.
+// Detects: pnpm (pnpm-workspace.yaml), yarn/npm (package.json "workspaces"),
+// nx (nx.json), lerna (lerna.json).
+func isWorkspace(dir string) bool {
+	// pnpm workspace
+	if _, err := os.Stat(filepath.Join(dir, "pnpm-workspace.yaml")); err == nil {
+		return true
+	}
+	// nx monorepo
+	if _, err := os.Stat(filepath.Join(dir, "nx.json")); err == nil {
+		return true
+	}
+	// lerna monorepo
+	if _, err := os.Stat(filepath.Join(dir, "lerna.json")); err == nil {
+		return true
+	}
+	// yarn/npm workspaces (package.json "workspaces" field)
+	data, err := os.ReadFile(filepath.Join(dir, "package.json"))
+	if err != nil {
+		return false
+	}
+	var pkg struct {
+		Workspaces json.RawMessage `json:"workspaces"`
+	}
+	if err := json.Unmarshal(data, &pkg); err != nil {
+		return false
+	}
+	return len(pkg.Workspaces) > 0
 }
 
 // getPkgName reads the "name" field from package.json

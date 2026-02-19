@@ -99,8 +99,9 @@ func (m launcherModel) Update(msg tea.Msg) (launcherModel, tea.Cmd) {
 			if m.step == stepWorktree {
 				return m, func() tea.Msg { return cancelLauncherMsg{} }
 			}
-			// Skip script step when going back from port for Encore projects
-			if m.step == stepPort && m.projIndex < len(m.projects) && m.projects[m.projIndex].IsEncore {
+			// Skip script step when going back from port for Encore projects without scripts
+			if m.step == stepPort && m.projIndex < len(m.projects) &&
+				m.projects[m.projIndex].IsEncore && len(m.projects[m.projIndex].Scripts) == 0 {
 				m.step = stepProject
 			} else {
 				m.step--
@@ -161,8 +162,8 @@ func (m launcherModel) advance() (launcherModel, tea.Cmd) {
 		}
 		proj := m.projects[m.projIndex]
 
-		// For Encore projects, skip script selection
-		if proj.IsEncore {
+		// For Encore projects without package.json scripts, skip to port
+		if proj.IsEncore && len(proj.Scripts) == 0 {
 			wt := m.worktrees[m.wtIndex]
 			key := config.PortKey(wt.Name, proj.Name)
 			m.portFixed = false

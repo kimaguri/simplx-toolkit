@@ -9,7 +9,7 @@ import "fmt"
 func DevCommand(isEncore bool, port int, pmBinary string, pkgName string, script string) (cmd string, args []string, env []string) {
 	portStr := fmt.Sprintf("%d", port)
 
-	if isEncore {
+	if isEncore && script == "" {
 		return "encore", []string{"run", "--port", portStr}, nil
 	}
 
