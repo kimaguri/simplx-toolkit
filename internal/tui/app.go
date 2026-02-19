@@ -124,11 +124,22 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.logView.SetSize(msg.Width, msg.Height)
 		}
 
-		// Resize PTY for all running processes
+		// Resize PTY to match the log viewport width (not full terminal width).
+		// In dashboard view, the log panel is ~2/3 of the terminal;
+		// in fullscreen log view, it's the full width.
+		var ptyCols uint16
+		if a.view == viewLogFull {
+			ptyCols = uint16(msg.Width)
+		} else {
+			_, rightW := a.dashboard.panelWidths()
+			ptyCols = uint16(rightW - 2) // subtract borders
+		}
 		ptyRows := uint16(msg.Height - 2)
-		ptyCols := uint16(msg.Width)
 		if ptyRows < 1 {
 			ptyRows = 1
+		}
+		if ptyCols < 1 {
+			ptyCols = 1
 		}
 		for _, rp := range a.pm.List() {
 			if rp.PtyFile != nil {
@@ -542,6 +553,11 @@ func (a App) updateDashboardKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			a.logView.SetSize(a.width, a.height)
 			a.view = viewLogFull
 
+			// Resize PTY to full width for fullscreen log view
+			if sel.PtyFile != nil {
+				_ = a.pm.ResizePTY(sel.Info.Name, uint16(a.height-2), uint16(a.width))
+			}
+
 			var cmds []tea.Cmd
 			sizeMsg := tea.WindowSizeMsg{Width: a.width, Height: a.height}
 			var cmd tea.Cmd
@@ -602,6 +618,18 @@ func (a App) updateLogViewKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "q", "esc":
 		a.logView.Unsubscribe()
 		a.view = viewDashboard
+
+		// Resize PTY back to dashboard panel width
+		_, rightW := a.dashboard.panelWidths()
+		ptyCols := uint16(rightW - 2)
+		if ptyCols < 1 {
+			ptyCols = 1
+		}
+		for _, rp := range a.pm.List() {
+			if rp.PtyFile != nil {
+				_ = a.pm.ResizePTY(rp.Info.Name, uint16(a.height-2), ptyCols)
+			}
+		}
 
 		a.dashboard.SetProcesses(a.pm.List())
 		cmd := a.dashboard.SubscribeToSelected()

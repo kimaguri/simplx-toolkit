@@ -723,27 +723,32 @@ func buildBottomBorder(innerW int, focused bool) string {
 	return bc.Render("╰" + strings.Repeat("─", innerW) + "╯")
 }
 
-// buildBodyLine wraps a content line with side borders and padding
+// buildBodyLine wraps a content line with side borders and padding.
+// Truncates lines wider than innerW to prevent layout breakage.
 func buildBodyLine(line string, innerW int, focused bool) string {
 	color := colorGray
 	if focused {
 		color = colorBlue
 	}
 	bc := lipgloss.NewStyle().Foreground(color)
-	pad := innerW - lipgloss.Width(line)
-	if pad < 0 {
-		pad = 0
+	lineW := lipgloss.Width(line)
+	if lineW > innerW {
+		line = ansi.Truncate(line, innerW, "")
+		lineW = innerW
 	}
+	pad := innerW - lineW
 	return bc.Render("│") + line + strings.Repeat(" ", pad) + bc.Render("│")
 }
 
 // wrapLogContent wraps long lines in log content to fit within maxWidth.
-// Uses ANSI-aware word wrapping so escape codes are preserved.
+// Uses ANSI-aware word wrapping, then hard wrapping to break any remaining
+// long "words" (URLs, paths) that exceed the width.
 func wrapLogContent(content string, maxWidth int) string {
 	if maxWidth <= 0 {
 		return content
 	}
-	return ansi.Wordwrap(content, maxWidth, "")
+	wrapped := ansi.Wordwrap(content, maxWidth, "")
+	return ansi.Hardwrap(wrapped, maxWidth, false)
 }
 
 // formatAge formats a duration since a time as a human-readable string
