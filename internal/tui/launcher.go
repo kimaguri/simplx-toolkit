@@ -374,7 +374,8 @@ func (m launcherModel) renderWorktreeList(width int) string {
 		lines = append(lines, m.renderWorktreeItem(i, wt, width))
 	}
 
-	return strings.Join(lines, "\n")
+	maxVis := m.maxVisibleItems(0)
+	return scrollWindow(lines, m.wtIndex, maxVis)
 }
 
 // renderWorktreeItem renders a single item in the worktree list
@@ -448,10 +449,11 @@ func (m launcherModel) renderProjectList(width int) string {
 		lines = append(lines, line)
 	}
 
+	maxVis := m.maxVisibleItems(2) // header is 1 line + 1 empty
 	return lipgloss.JoinVertical(lipgloss.Left,
 		header,
 		"",
-		lipgloss.NewStyle().Width(width).Render(strings.Join(lines, "\n")),
+		lipgloss.NewStyle().Width(width).Render(scrollWindow(lines, m.projIndex, maxVis)),
 	)
 }
 
@@ -486,10 +488,11 @@ func (m launcherModel) renderScriptList(width int) string {
 		lines = append(lines, line)
 	}
 
+	maxVis := m.maxVisibleItems(3) // header is 2 lines + 1 empty
 	return lipgloss.JoinVertical(lipgloss.Left,
 		header,
 		"",
-		lipgloss.NewStyle().Width(width).Render(strings.Join(lines, "\n")),
+		lipgloss.NewStyle().Width(width).Render(scrollWindow(lines, m.scriptIndex, maxVis)),
 	)
 }
 
@@ -572,6 +575,53 @@ func (m launcherModel) renderConfirm(width int) string {
 func (m *launcherModel) SetSize(w, h int) {
 	m.width = w
 	m.height = h
+}
+
+// modalOverheadLines is the number of lines used by title, step indicator,
+// footer hint, empty lines, and modal border padding.
+const modalOverheadLines = 12
+
+// maxVisibleItems calculates how many list items fit in the modal,
+// subtracting modal chrome and header lines.
+func (m launcherModel) maxVisibleItems(headerLines int) int {
+	avail := m.height - modalOverheadLines - headerLines
+	if avail < 5 {
+		avail = 5
+	}
+	return avail
+}
+
+// scrollWindow returns a visible slice of lines with "↑ N more" / "↓ N more"
+// indicators when the list is longer than maxVisible.
+func scrollWindow(lines []string, selectedIdx, maxVisible int) string {
+	if len(lines) <= maxVisible {
+		return strings.Join(lines, "\n")
+	}
+
+	// Keep selected item visible, roughly centered
+	half := maxVisible / 2
+	start := selectedIdx - half
+	if start < 0 {
+		start = 0
+	}
+	end := start + maxVisible
+	if end > len(lines) {
+		end = len(lines)
+		start = end - maxVisible
+		if start < 0 {
+			start = 0
+		}
+	}
+
+	var result []string
+	if start > 0 {
+		result = append(result, dimStyle.Render(fmt.Sprintf("  ↑ %d more", start)))
+	}
+	result = append(result, lines[start:end]...)
+	if end < len(lines) {
+		result = append(result, dimStyle.Render(fmt.Sprintf("  ↓ %d more", len(lines)-end)))
+	}
+	return strings.Join(result, "\n")
 }
 
 // parsePort converts a string to an integer port number
