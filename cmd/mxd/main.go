@@ -4,13 +4,17 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
+	"github.com/GianlucaP106/gotmux/gotmux"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
 
+	"github.com/kimaguri/simplx-toolkit/internal/mxd/agent"
 	mxdconfig "github.com/kimaguri/simplx-toolkit/internal/mxd/config"
 	mxdlog "github.com/kimaguri/simplx-toolkit/internal/mxd/log"
 	"github.com/kimaguri/simplx-toolkit/internal/mxd/repo"
+	"github.com/kimaguri/simplx-toolkit/internal/mxd/task"
 	mxdtmux "github.com/kimaguri/simplx-toolkit/internal/mxd/tmux"
 	"github.com/kimaguri/simplx-toolkit/internal/mxd/tui"
 )
@@ -136,6 +140,27 @@ func runTask(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Fprintf(os.Stderr, "Created worktree: %s → %s\n", selectedRepo.Name, branchName)
 
+	// Save task state
+	tk := &task.Task{
+		ID:      taskID,
+		Type:    taskType,
+		Title:   taskText,
+		Status:  task.StatusActive,
+		Created: time.Now(),
+		Repos: []task.TaskRepo{{
+			Name:   selectedRepo.Name,
+			Branch: branchName,
+			Agent:  agentName,
+			Status: task.RepoInProgress,
+		}},
+	}
+	if taskID == "" {
+		tk.ID = slug // fallback ID
+	}
+	if err := task.Save(tk); err != nil {
+		mxdlog.Logger.Warn().Err(err).Msg("failed to save task")
+	}
+
 	// Create tmux session
 	tmuxClient, err := mxdtmux.NewClient()
 	if err != nil {
@@ -156,27 +181,29 @@ func runTask(cmd *cobra.Command, args []string) error {
 	}
 	mxdlog.Logger.Info().Str("session", sessionName).Msg("tmux session created")
 
-	// Get initial pane and send agent command
+	// Get lead pane (mxd control)
 	panes, err := tmuxClient.GetSessionPanes(sessionName)
 	if err != nil || len(panes) == 0 {
 		return fmt.Errorf("get session panes: %w", err)
 	}
-	agentPane := panes[0]
+	leadPane := panes[0]
 
-	// Build agent command
-	agentCmd := fmt.Sprintf("cd %q && claude %q", wtDir, desc)
+	// Spawn agent in split pane
+	var agentConf mxdconfig.AgentConf
 	if globalCfg != nil {
 		if ac, ok := globalCfg.Agents[agentName]; ok {
-			agentCmd = fmt.Sprintf("cd %q && %s", wtDir, ac.Command)
-			for _, a := range ac.Args {
-				agentCmd += " " + a
-			}
-			agentCmd += fmt.Sprintf(" %q", desc)
+			agentConf = ac
 		}
 	}
-	if err := tmuxClient.SendKeys(agentPane, agentCmd); err != nil {
-		mxdlog.Logger.Warn().Err(err).Msg("failed to send agent command")
+	if agentConf.Command == "" {
+		agentConf = mxdconfig.AgentConf{Name: "claude", Command: "claude"}
 	}
+
+	agentPane, err := spawnAgentInRepo(tmuxClient, leadPane, agentConf, wtDir, desc)
+	if err != nil {
+		mxdlog.Logger.Warn().Err(err).Msg("failed to spawn agent")
+	}
+	_ = agentPane // will be used by TUI later
 
 	// Launch TUI in current terminal
 	taskInfo := tui.TaskInfo{
@@ -198,11 +225,29 @@ func runTask(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("TUI error: %w", err)
 	}
 
+	// Update task status on exit
+	tk.Status = task.StatusParked
+	task.Save(tk)
+
 	// Cleanup on quit
 	mxdlog.Logger.Info().Msg("TUI exited, cleaning up tmux session")
 	_ = tmuxClient.KillSession(sessionName)
 
 	return nil
+}
+
+// spawnAgentInRepo creates a pane and launches an agent in it.
+func spawnAgentInRepo(tmuxClient *mxdtmux.Client, leadPane *gotmux.Pane, agentConf mxdconfig.AgentConf, wtDir, prompt string) (*gotmux.Pane, error) {
+	agentPane, err := tmuxClient.SplitPane(leadPane, false, wtDir)
+	if err != nil {
+		return nil, fmt.Errorf("split pane: %w", err)
+	}
+
+	agentCmd := fmt.Sprintf("cd %q && %s", wtDir, agent.BuildCommand(agentConf, prompt))
+	if err := tmuxClient.SendKeys(agentPane, agentCmd); err != nil {
+		return agentPane, fmt.Errorf("send keys: %w", err)
+	}
+	return agentPane, nil
 }
 
 // findProjectRoot walks up from dir looking for .mxd/project.toml
