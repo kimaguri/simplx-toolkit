@@ -48,6 +48,18 @@ func TestNewSessionAndKill(t *testing.T) {
 		t.Fatalf("SplitPane: %v", err)
 	}
 
+	// Verify the split created a new pane (not the original)
+	panesAfterSplit, err := c.GetSessionPanes(sessionName)
+	if err != nil {
+		t.Fatalf("GetSessionPanes after split: %v", err)
+	}
+	if len(panesAfterSplit) < 2 {
+		t.Fatalf("expected 2+ panes after split, got %d", len(panesAfterSplit))
+	}
+	if newPane.Id == panes[0].Id {
+		t.Error("SplitPane returned original pane, expected new one")
+	}
+
 	err = c.SendKeys(newPane, "echo hello")
 	if err != nil {
 		t.Fatalf("SendKeys: %v", err)

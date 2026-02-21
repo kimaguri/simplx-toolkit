@@ -46,25 +46,81 @@ func (c *Client) KillSession(name string) error {
 	return s.Kill()
 }
 
-// SplitPane splits a pane. vertical=false means side-by-side (horizontal split).
+// SplitPane splits a pane and returns the newly created pane.
 func (c *Client) SplitPane(pane *gotmux.Pane, vertical bool, startDir string) (*gotmux.Pane, error) {
+	// Get window and count panes before split
+	window, err := c.getWindowForPane(pane)
+	if err != nil {
+		return nil, fmt.Errorf("get window: %w", err)
+	}
+	panesBefore, err := window.ListPanes()
+	if err != nil {
+		return nil, fmt.Errorf("list panes before: %w", err)
+	}
+	existingIDs := make(map[string]bool, len(panesBefore))
+	for _, p := range panesBefore {
+		existingIDs[p.Id] = true
+	}
+
 	dir := gotmux.PaneSplitDirectionHorizontal
 	if vertical {
 		dir = gotmux.PaneSplitDirectionVertical
 	}
-	err := pane.SplitWindow(&gotmux.SplitWindowOptions{
+	err = pane.SplitWindow(&gotmux.SplitWindowOptions{
 		SplitDirection: dir,
 		StartDirectory: startDir,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("split pane: %w", err)
 	}
-	// After split, fetch the updated pane to get the new sibling
-	newPane, err := c.tmux.GetPaneById(pane.Id)
+
+	// Find the new pane
+	panesAfter, err := window.ListPanes()
 	if err != nil {
-		return nil, fmt.Errorf("get pane after split: %w", err)
+		return nil, fmt.Errorf("list panes after: %w", err)
 	}
-	return newPane, nil
+	for _, p := range panesAfter {
+		if !existingIDs[p.Id] {
+			return p, nil
+		}
+	}
+	// Fallback: return last pane
+	if len(panesAfter) > 0 {
+		return panesAfter[len(panesAfter)-1], nil
+	}
+	return nil, fmt.Errorf("new pane not found after split")
+}
+
+// getWindowForPane finds the window containing a pane.
+func (c *Client) getWindowForPane(pane *gotmux.Pane) (*gotmux.Window, error) {
+	sessions, err := c.tmux.ListSessions()
+	if err != nil {
+		return nil, err
+	}
+	for _, s := range sessions {
+		windows, err := s.ListWindows()
+		if err != nil {
+			continue
+		}
+		for _, w := range windows {
+			panes, err := w.ListPanes()
+			if err != nil {
+				continue
+			}
+			for _, p := range panes {
+				if p.Id == pane.Id {
+					return w, nil
+				}
+			}
+		}
+	}
+	return nil, fmt.Errorf("window for pane %s not found", pane.Id)
+}
+
+// FocusPane selects (focuses) a specific pane.
+func (c *Client) FocusPane(pane *gotmux.Pane) error {
+	_, err := c.tmux.Command("select-pane", "-t", pane.Id)
+	return err
 }
 
 // SendKeys sends keystrokes to a pane.
