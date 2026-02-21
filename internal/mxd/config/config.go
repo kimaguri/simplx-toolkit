@@ -39,10 +39,11 @@ type GlobalConfig struct {
 }
 
 type AgentConf struct {
-	Name    string   `toml:"name"`
-	Command string   `toml:"command"`
-	Args    []string `toml:"args"`
-	Detect  string   `toml:"detect"`
+	Name        string   `toml:"name"`
+	Command     string   `toml:"command"`
+	Args        []string `toml:"args"`
+	Detect      string   `toml:"detect"`
+	Interactive bool     `toml:"interactive"`
 }
 
 // LoadProjectConfig reads .mxd/project.toml from the given root directory.

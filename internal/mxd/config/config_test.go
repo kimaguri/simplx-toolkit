@@ -73,6 +73,7 @@ name = "Claude Code"
 command = "claude"
 args = ["--dangerously-skip-permissions"]
 detect = "which claude"
+interactive = true
 
 [agents.codex]
 name = "Codex CLI"
@@ -105,5 +106,8 @@ detect = "which codex"
 	}
 	if len(claude.Args) != 1 || claude.Args[0] != "--dangerously-skip-permissions" {
 		t.Errorf("claude args = %v, want [--dangerously-skip-permissions]", claude.Args)
+	}
+	if !claude.Interactive {
+		t.Errorf("claude interactive = %v, want true", claude.Interactive)
 	}
 }
