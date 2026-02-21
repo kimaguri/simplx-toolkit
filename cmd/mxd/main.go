@@ -43,10 +43,32 @@ var taskCmd = &cobra.Command{
 var taskListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List all tasks",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		fmt.Println("No tasks yet.")
-		return nil
-	},
+	RunE:  runTaskList,
+}
+
+var taskResumeCmd = &cobra.Command{
+	Use:   "resume <task-id>",
+	Short: "Resume an existing task",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runTaskResume,
+}
+
+var agentsCmd = &cobra.Command{
+	Use:   "agents",
+	Short: "List available agents",
+	RunE:  runAgents,
+}
+
+var repoCmd = &cobra.Command{
+	Use:   "repo",
+	Short: "Manage repos in current task",
+}
+
+var repoAddCmd = &cobra.Command{
+	Use:   "add <repo-name>",
+	Short: "Add a repo to the current task",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runRepoAdd,
 }
 
 var versionCmd = &cobra.Command{
@@ -59,7 +81,11 @@ var versionCmd = &cobra.Command{
 
 func init() {
 	taskCmd.AddCommand(taskListCmd)
+	taskCmd.AddCommand(taskResumeCmd)
 	rootCmd.AddCommand(taskCmd)
+	rootCmd.AddCommand(agentsCmd)
+	repoCmd.AddCommand(repoAddCmd)
+	rootCmd.AddCommand(repoCmd)
 	rootCmd.AddCommand(versionCmd)
 }
 
@@ -67,6 +93,210 @@ func main() {
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
 	}
+}
+
+func runAgents(cmd *cobra.Command, args []string) error {
+	configDir := mxdconfig.GlobalConfigDir()
+	globalCfg, err := mxdconfig.LoadGlobalConfig(configDir)
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+
+	fmt.Printf("%-15s %-20s %-10s %s\n", "KEY", "NAME", "STATUS", "COMMAND")
+	fmt.Printf("%-15s %-20s %-10s %s\n", "---", "----", "------", "-------")
+	for key, ac := range globalCfg.Agents {
+		status := "missing"
+		if agent.Detect(ac) {
+			status = "available"
+		}
+		fmt.Printf("%-15s %-20s %-10s %s\n", key, ac.Name, status, ac.Command)
+	}
+	return nil
+}
+
+func runRepoAdd(cmd *cobra.Command, args []string) error {
+	repoName := args[0]
+
+	// Init logger
+	configDir := mxdconfig.GlobalConfigDir()
+	os.MkdirAll(configDir, 0o755)
+	mxdlog.Init(configDir)
+
+	// Find project config
+	cwd, _ := os.Getwd()
+	projectRoot := findProjectRoot(cwd)
+	if projectRoot == "" {
+		return fmt.Errorf("no .mxd/project.toml found")
+	}
+
+	projCfg, err := mxdconfig.LoadProjectConfig(projectRoot)
+	if err != nil {
+		return fmt.Errorf("load project config: %w", err)
+	}
+
+	// Find repo in project config
+	var repoConf *mxdconfig.RepoConf
+	for _, r := range projCfg.Project.Repos {
+		if r.Name == repoName {
+			rc := r
+			repoConf = &rc
+			break
+		}
+	}
+	if repoConf == nil {
+		return fmt.Errorf("repo %q not found in project.toml", repoName)
+	}
+
+	// Find active task (most recently saved)
+	tasks, err := task.List()
+	if err != nil || len(tasks) == 0 {
+		return fmt.Errorf("no active tasks found")
+	}
+
+	// Find the active task
+	var tk *task.Task
+	for _, t := range tasks {
+		if t.Status == task.StatusActive {
+			tk = t
+			break
+		}
+	}
+	if tk == nil {
+		tk = tasks[len(tasks)-1] // fallback to last task
+	}
+
+	// Check if repo already in task
+	for _, r := range tk.Repos {
+		if r.Name == repoName {
+			return fmt.Errorf("repo %q already in task %s", repoName, tk.ID)
+		}
+	}
+
+	// Load global config for agent
+	globalCfg, _ := mxdconfig.LoadGlobalConfig(configDir)
+	agentName := "claude"
+	if globalCfg != nil && globalCfg.DefaultAgent != "" {
+		agentName = globalCfg.DefaultAgent
+	}
+
+	// Build branch name using same template
+	branchVars := map[string]string{
+		"type":   tk.Type,
+		"taskId": tk.ID,
+		"slug":   repo.Slugify(tk.Title),
+		"repo":   repoName,
+	}
+	branchName := repo.BranchName(projCfg.Branch.Template, branchVars)
+
+	// Create worktree
+	repoPath := filepath.Join(projectRoot, repoConf.Path)
+	slug := repo.Slugify(tk.Title)
+	wtDir := filepath.Join(repoPath, projCfg.Branch.WorktreeDir, slug)
+	if err := repo.CreateWorktree(repoPath, wtDir, branchName, projCfg.Branch.Base); err != nil {
+		return fmt.Errorf("create worktree: %w", err)
+	}
+
+	// Add repo to task
+	if err := task.AddRepo(tk, repoName, branchName, agentName); err != nil {
+		return fmt.Errorf("add repo: %w", err)
+	}
+
+	fmt.Fprintf(os.Stderr, "Added repo %s → %s\n", repoName, branchName)
+	return nil
+}
+
+func runTaskList(cmd *cobra.Command, args []string) error {
+	tasks, err := task.List()
+	if err != nil {
+		return fmt.Errorf("list tasks: %w", err)
+	}
+	if len(tasks) == 0 {
+		fmt.Println("No tasks.")
+		return nil
+	}
+
+	fmt.Printf("%-15s %-8s %-8s %s\n", "ID", "TYPE", "STATUS", "TITLE")
+	fmt.Printf("%-15s %-8s %-8s %s\n", "---", "----", "------", "-----")
+	for _, t := range tasks {
+		repoCount := len(t.Repos)
+		title := t.Title
+		if len(title) > 40 {
+			title = title[:37] + "..."
+		}
+		fmt.Printf("%-15s %-8s %-8s %s (%d repos)\n", t.ID, t.Type, t.Status, title, repoCount)
+	}
+	return nil
+}
+
+func runTaskResume(cmd *cobra.Command, args []string) error {
+	taskID := args[0]
+
+	// Init logger
+	configDir := mxdconfig.GlobalConfigDir()
+	os.MkdirAll(configDir, 0o755)
+	mxdlog.Init(configDir)
+
+	// Load task from disk
+	tk, err := task.Load(taskID)
+	if err != nil {
+		return fmt.Errorf("load task: %w", err)
+	}
+
+	mxdlog.Logger.Info().Str("id", taskID).Msg("resuming task")
+	tk.Status = task.StatusActive
+	task.Save(tk)
+
+	// Load configs
+	globalCfg, _ := mxdconfig.LoadGlobalConfig(configDir)
+
+	// Create tmux client
+	tmuxClient, err := mxdtmux.NewClient()
+	if err != nil {
+		return fmt.Errorf("tmux: %w", err)
+	}
+
+	sessionName := "mxd-" + taskID
+
+	// Check if session exists, create if not
+	if !tmuxClient.HasSession(sessionName) {
+		_, err = tmuxClient.NewSession(sessionName)
+		if err != nil {
+			return fmt.Errorf("create tmux session: %w", err)
+		}
+	}
+
+	// Build TUI task info from persisted task
+	var repos []tui.RepoInfo
+	for _, r := range tk.Repos {
+		repos = append(repos, tui.RepoInfo{
+			Name:      r.Name,
+			Branch:    r.Branch,
+			AgentName: r.Agent,
+			Status:    r.Status,
+		})
+	}
+
+	taskInfo := tui.TaskInfo{
+		Description: fmt.Sprintf("%s %s: %s", tk.Type, tk.ID, tk.Title),
+		TaskType:    tk.Type,
+		TaskID:      tk.ID,
+		Repos:       repos,
+	}
+
+	app := tui.NewApp(taskInfo)
+	p := tea.NewProgram(app, tea.WithAltScreen())
+	if _, err := p.Run(); err != nil {
+		return fmt.Errorf("TUI error: %w", err)
+	}
+
+	// Update task on exit
+	tk.Status = task.StatusParked
+	task.Save(tk)
+	_ = tmuxClient
+	_ = globalCfg
+
+	mxdlog.Logger.Info().Msg("TUI exited (resumed task)")
+	return nil
 }
 
 func runTask(cmd *cobra.Command, args []string) error {
