@@ -284,6 +284,25 @@ func launchWorkspace(configDir string, initialTaskID string) (backToDash bool, e
 	}
 	workspace.SetPaneController(paneCtrl)
 
+	workspace.SetPaneLauncher(func(info tui.PaneLaunchInfo) (*tui.PaneInit, error) {
+		si := process.SessionInfo{
+			Name:    info.ProcessKey,
+			Command: info.Command,
+			Args:    info.Args,
+			WorkDir: info.WorkDir,
+		}
+		rp, err := pm.Start(si)
+		if err != nil {
+			return nil, err
+		}
+		return &tui.PaneInit{
+			ProcessKey:  info.ProcessKey,
+			VTerm:       rp.VTerm,
+			PTYWriter:   rp.PtyFile,
+			WorktreeDir: info.WorkDir,
+		}, nil
+	})
+
 	// Load available repos from scan_dirs
 	loadRepos := func() []tui.RepoEntry {
 		cfg, _ := mxdconfig.LoadGlobalConfig(configDir)

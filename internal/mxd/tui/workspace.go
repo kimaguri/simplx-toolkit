@@ -32,6 +32,17 @@ type PaneInit struct {
 	WorktreeDir string                       // worktree directory for handoff scanning
 }
 
+// PaneLauncher spawns a process and returns pane init (for lazygit, etc.)
+type PaneLauncher func(info PaneLaunchInfo) (*PaneInit, error)
+
+// PaneLaunchInfo holds the info needed to launch a process in a pane.
+type PaneLaunchInfo struct {
+	ProcessKey string
+	Command    string
+	Args       []string
+	WorkDir    string
+}
+
 // PaneController provides callbacks to control agent processes from the workspace.
 type PaneController struct {
 	Stop    func(name string) error
@@ -79,6 +90,7 @@ type Workspace struct {
 	initialTaskID string     // task to auto-open on start
 	taskPanes     map[string][]termPaneModel // cached panes per task ID
 	paneCtrl      *PaneController
+	paneLauncher  PaneLauncher
 	overlay       overlayModel
 	handoffOvl    *handoffOverlayModel       // active handoff overlay (Task 2)
 	msgOverlay    *messageOverlayModel       // active message overlay (Task 5)
@@ -111,6 +123,11 @@ func NewWorkspace(tasks []TaskEntry, opener TaskOpener, loadTasks func() []TaskE
 // SetPaneController sets the callbacks for process control.
 func (w *Workspace) SetPaneController(ctrl *PaneController) {
 	w.paneCtrl = ctrl
+}
+
+// SetPaneLauncher sets the callback for launching processes in panes (e.g. lazygit).
+func (w *Workspace) SetPaneLauncher(fn PaneLauncher) {
+	w.paneLauncher = fn
 }
 
 // SetCallbacks sets optional callbacks for task/repo management.
@@ -466,6 +483,32 @@ func (w *Workspace) updatePaneKeys(msg tea.KeyMsg) (*Workspace, tea.Cmd) {
 				w.overlay = newOverlay(overlayAddRepo, available, w.width, w.height)
 				w.mode = modeOverlay
 				w.syncStatusBar()
+			}
+		}
+	case "g":
+		// Launch lazygit in the focused pane's worktree directory
+		if w.paneLauncher != nil && w.paneIdx < len(w.panes) && w.panes[w.paneIdx].worktreeDir != "" {
+			pane := &w.panes[w.paneIdx]
+			// Stop current agent if running
+			if pane.status == paneRunning && w.paneCtrl != nil {
+				w.paneCtrl.Stop(pane.processKey)
+			}
+			lgKey := pane.processKey + ":lazygit"
+			pi, err := w.paneLauncher(PaneLaunchInfo{
+				ProcessKey: lgKey,
+				Command:    "lazygit",
+				Args:       []string{"-p", pane.worktreeDir},
+				WorkDir:    pane.worktreeDir,
+			})
+			if err == nil && pi != nil {
+				pane.vterm = pi.VTerm
+				pane.ptyWriter = pi.PTYWriter
+				pane.status = paneRunning
+				pane.content = ""
+				pane.interactive = true
+				w.mode = modeInteractive
+				w.syncStatusBar()
+				return w, schedulePaneRefresh()
 			}
 		}
 	case "y":
