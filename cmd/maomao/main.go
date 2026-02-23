@@ -312,11 +312,9 @@ func launchWorkspace(configDir string, initialTaskID string) (backToDash bool, e
 		worktrees := discovery.ScanWorktrees(cfg.ScanDirs)
 		var repos []tui.RepoEntry
 		for _, wt := range worktrees {
-			if !wt.IsWorktree {
-				repos = append(repos, tui.RepoEntry{
-					Name: wt.Name, Path: wt.Path, Branch: wt.Branch,
-				})
-			}
+			repos = append(repos, tui.RepoEntry{
+				Name: wt.Name, Path: wt.Path, Branch: wt.Branch,
+			})
 		}
 		return repos
 	}
@@ -600,13 +598,11 @@ func buildStatusData(configDir string) tui.StatusData {
 	if globalCfg != nil && len(globalCfg.ScanDirs) > 0 {
 		worktrees := discovery.ScanWorktrees(globalCfg.ScanDirs)
 		for _, wt := range worktrees {
-			if !wt.IsWorktree {
-				repos = append(repos, tui.RepoEntry{
-					Name:   wt.Name,
-					Path:   wt.Path,
-					Branch: wt.Branch,
-				})
-			}
+			repos = append(repos, tui.RepoEntry{
+				Name:   wt.Name,
+				Path:   wt.Path,
+				Branch: wt.Branch,
+			})
 		}
 		scanOK = len(repos) > 0
 	}
