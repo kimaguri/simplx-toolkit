@@ -159,6 +159,10 @@ func (w *Workspace) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// Sync sidebar task status indicators in realtime
 		w.updateTaskStatuses()
+		// Refresh git statuses every ~3s (60 ticks * 50ms)
+		if len(w.panes) > 0 && w.panes[0].tick%60 == 0 {
+			w.updateGitStatuses()
+		}
 		if w.hasRunningPanes() {
 			return w, schedulePaneRefresh()
 		}
@@ -1019,6 +1023,17 @@ func (w *Workspace) hasRunningPanes() bool {
 		}
 	}
 	return false
+}
+
+// updateGitStatuses fetches git status for all active panes and updates the sidebar.
+func (w *Workspace) updateGitStatuses() {
+	statuses := make(map[string]gitStatus)
+	for _, p := range w.panes {
+		if p.worktreeDir != "" {
+			statuses[p.name] = fetchGitStatus(p.worktreeDir)
+		}
+	}
+	w.sidebar.SetRepoStatuses(statuses)
 }
 
 // collectPaneNames returns names from all panes.

@@ -17,7 +17,8 @@ type sidebarModel struct {
 	width        int
 	height       int
 	focused      bool
-	taskStatuses map[string]string // task ID -> status ("running", "cached")
+	taskStatuses map[string]string    // task ID -> status ("running", "cached")
+	repoStatuses map[string]gitStatus // repoName -> git status
 }
 
 // newSidebar creates a sidebar populated with the given tasks.
@@ -194,7 +195,13 @@ func (s sidebarModel) View() string {
 
 			if len(selected.RepoNames) > 0 {
 				for _, name := range selected.RepoNames {
-					lines = append(lines, dimSt.Render("     \u2022 "+name))
+					statusLabel := ""
+					if s.repoStatuses != nil {
+						if gs, ok := s.repoStatuses[name]; ok {
+							statusLabel = " " + graySt.Render(gs.Label())
+						}
+					}
+					lines = append(lines, dimSt.Render("     \u2022 "+name)+statusLabel)
 				}
 			}
 		}
@@ -334,6 +341,11 @@ func (s *sidebarModel) SelectedTask() *TaskEntry {
 		return nil
 	}
 	return &s.tasks[s.cursor]
+}
+
+// SetRepoStatuses updates the cached git status for each repo.
+func (s *sidebarModel) SetRepoStatuses(statuses map[string]gitStatus) {
+	s.repoStatuses = statuses
 }
 
 // SetTasks replaces the task list and clamps the cursor to valid bounds.
