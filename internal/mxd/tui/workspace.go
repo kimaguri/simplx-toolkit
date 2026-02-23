@@ -794,7 +794,7 @@ func (w *Workspace) View() string {
 			Padding(1, 3).
 			BorderStyle(lipgloss.RoundedBorder()).
 			BorderForeground(catBlue).
-			Render("Quit 猫猫 maomao? (y/n)")
+			Render("Quit マオマオ maomao? (y/n)")
 		return lipgloss.Place(w.width, w.height,
 			lipgloss.Center, lipgloss.Center,
 			prompt)
