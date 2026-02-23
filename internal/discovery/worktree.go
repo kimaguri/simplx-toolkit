@@ -1,6 +1,7 @@
 package discovery
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -59,6 +60,14 @@ func ScanWorktrees(scanDirs []string) []Worktree {
 			}
 			wt.IsWorktree, wt.MainProject = detectWorktreeInfo(absPath)
 			worktrees = append(worktrees, wt)
+		}
+	}
+
+	// Second pass: discover linked worktrees via git for each main repo
+	for _, wt := range worktrees {
+		if !wt.IsWorktree {
+			linked := discoverLinkedWorktrees(wt.Path, seen)
+			worktrees = append(worktrees, linked...)
 		}
 	}
 
@@ -189,6 +198,72 @@ func detectLastCommit(dir string) time.Time {
 		return time.Time{}
 	}
 	return time.Unix(ts, 0)
+}
+
+// worktreeListEntry represents a single entry from `git worktree list --porcelain` output
+type worktreeListEntry struct {
+	Path   string
+	Branch string
+}
+
+// parseWorktreeListOutput parses the output of `git worktree list --porcelain`
+// into a slice of worktreeListEntry structs.
+func parseWorktreeListOutput(output string) []worktreeListEntry {
+	var entries []worktreeListEntry
+	var current worktreeListEntry
+
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			if current.Path != "" {
+				entries = append(entries, current)
+				current = worktreeListEntry{}
+			}
+			continue
+		}
+		if strings.HasPrefix(line, "worktree ") {
+			current.Path = strings.TrimPrefix(line, "worktree ")
+		} else if strings.HasPrefix(line, "branch ") {
+			ref := strings.TrimPrefix(line, "branch ")
+			current.Branch = strings.TrimPrefix(ref, "refs/heads/")
+		}
+	}
+	if current.Path != "" {
+		entries = append(entries, current)
+	}
+	return entries
+}
+
+// discoverLinkedWorktrees runs `git worktree list --porcelain` on a main repo
+// and returns Worktree entries for any worktrees NOT already in the seen set.
+func discoverLinkedWorktrees(mainRepoPath string, seen map[string]bool) []Worktree {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", "worktree", "list", "--porcelain")
+	cmd.Dir = mainRepoPath
+	out, err := cmd.Output()
+	if err != nil {
+		return nil
+	}
+
+	entries := parseWorktreeListOutput(string(out))
+	var result []Worktree
+	for _, e := range entries {
+		if seen[e.Path] || e.Path == mainRepoPath {
+			continue
+		}
+		seen[e.Path] = true
+		wt := Worktree{
+			Name:         filepath.Base(e.Path),
+			Path:         e.Path,
+			Branch:       e.Branch,
+			LastModified: detectLastCommit(e.Path),
+			IsWorktree:   true,
+			MainProject:  filepath.Base(mainRepoPath),
+		}
+		result = append(result, wt)
+	}
+	return result
 }
 
 // expandHome expands ~ to user home directory
