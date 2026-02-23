@@ -97,6 +97,7 @@ func (s statusBarModel) renderHints() string {
 				hint("r", "restart"),
 				hint("f", "full"),
 				hint("g", "git"),
+				hint("t", "tasks"),
 				hint("b", "sidebar"),
 				hint("a", "add repo"),
 				hint("m", "message"),

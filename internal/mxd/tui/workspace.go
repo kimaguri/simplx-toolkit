@@ -101,6 +101,8 @@ type Workspace struct {
 	deleteConfirm  bool   // true = showing delete confirmation
 	deleteTaskID   string // task being confirmed for deletion
 	deleteCursor   int    // 0 = delete all, 1 = keep branches
+	tdOverlay      bool   // true = showing td status overlay
+	tdContent      string // cached td status output
 	width          int
 	height        int
 	lastEsc       time.Time // for double-Esc detection
@@ -216,6 +218,13 @@ func (w *Workspace) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return w, nil
 
 	case tea.KeyMsg:
+		// td status overlay takes top priority
+		if w.tdOverlay {
+			if msg.String() == "esc" || msg.String() == "q" || msg.String() == "t" {
+				w.tdOverlay = false
+			}
+			return w, nil
+		}
 		// Quit confirmation takes priority
 		if w.quitConfirm {
 			switch msg.String() {
@@ -510,6 +519,13 @@ func (w *Workspace) updatePaneKeys(msg tea.KeyMsg) (*Workspace, tea.Cmd) {
 				w.syncStatusBar()
 				return w, schedulePaneRefresh()
 			}
+		}
+	case "t":
+		// Show td status for focused pane's worktree
+		if w.paneIdx < len(w.panes) && w.panes[w.paneIdx].worktreeDir != "" {
+			content := fetchTdStatus(w.panes[w.paneIdx].worktreeDir)
+			w.tdContent = content
+			w.tdOverlay = true
 		}
 	case "y":
 		// Copy focused pane content to clipboard
@@ -830,6 +846,18 @@ func (w *Workspace) View() string {
 			w.overlay.height = w.height
 			return w.overlay.View()
 		}
+	}
+
+	// td status overlay
+	if w.tdOverlay {
+		box := lipgloss.NewStyle().
+			Width(w.width - 10).
+			MaxHeight(w.height - 6).
+			Padding(1, 2).
+			BorderStyle(lipgloss.RoundedBorder()).
+			BorderForeground(catBlue).
+			Render(w.tdContent)
+		return lipgloss.Place(w.width, w.height, lipgloss.Center, lipgloss.Center, box)
 	}
 
 	// Quit confirmation overlay
