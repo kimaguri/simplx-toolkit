@@ -32,10 +32,19 @@ builds:
       - -s -w -X main.version={{.Version}} -X main.commit={{.Commit}}
 
 archives:
-  - id: default
+  - id: devdash
+    builds:
+      - devdash
     formats:
       - tar.gz
-    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    name_template: "devdash_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+  - id: maomao
+    builds:
+      - maomao
+    formats:
+      - tar.gz
+    name_template: "maomao_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
 
 checksum:
   name_template: "checksums.txt"
