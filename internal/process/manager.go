@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -76,7 +77,8 @@ func (pm *ProcessManager) PnpmPath() string {
 
 // logFilePath returns the log file path for a session
 func (pm *ProcessManager) logFilePath(name string) string {
-	return filepath.Join(pm.logsDir, name+".log")
+	safe := strings.ReplaceAll(name, "/", "_")
+	return filepath.Join(pm.logsDir, safe+".log")
 }
 
 // Start spawns a new process based on the given SessionInfo

@@ -12,13 +12,13 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/kimaguri/simplx-toolkit/internal/discovery"
-	"github.com/kimaguri/simplx-toolkit/internal/mxd/agent"
-	mxdconfig "github.com/kimaguri/simplx-toolkit/internal/mxd/config"
-	"github.com/kimaguri/simplx-toolkit/internal/mxd/event"
-	mxdlog "github.com/kimaguri/simplx-toolkit/internal/mxd/log"
-	"github.com/kimaguri/simplx-toolkit/internal/mxd/repo"
-	"github.com/kimaguri/simplx-toolkit/internal/mxd/task"
-	"github.com/kimaguri/simplx-toolkit/internal/mxd/tui"
+	"github.com/kimaguri/simplx-toolkit/internal/maomao/agent"
+	maomaoconfig "github.com/kimaguri/simplx-toolkit/internal/maomao/config"
+	"github.com/kimaguri/simplx-toolkit/internal/maomao/event"
+	maomaolog "github.com/kimaguri/simplx-toolkit/internal/maomao/log"
+	"github.com/kimaguri/simplx-toolkit/internal/maomao/repo"
+	"github.com/kimaguri/simplx-toolkit/internal/maomao/task"
+	"github.com/kimaguri/simplx-toolkit/internal/maomao/tui"
 	"github.com/kimaguri/simplx-toolkit/internal/process"
 )
 
@@ -110,74 +110,48 @@ func init() {
 }
 
 func main() {
-	mxdconfig.MigrateConfigDir()
+	maomaoconfig.MigrateConfigDir()
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
 	}
 }
 
 func runStatus(cmd *cobra.Command, args []string) error {
-	configDir := mxdconfig.GlobalConfigDir()
+	configDir := maomaoconfig.GlobalConfigDir()
 	os.MkdirAll(configDir, 0o755)
-	mxdlog.Init(configDir)
+	maomaolog.Init(configDir)
 	event.Init(configDir)
 
-	var flash string
-	for {
-		_, globalErr := mxdconfig.LoadGlobalConfig(configDir)
-
-		checks := []tui.WizardCheck{
-			{
-				Label:   "Global config",
-				Detail:  "~/.config/maomao/config.toml",
-				OK:      globalErr == nil,
-				Fixable: globalErr != nil,
-				Fix:     func() error { return createGlobalConfig(configDir) },
-			},
-		}
-
-		buildStatus := func() tui.StatusData {
-			return buildStatusData(configDir)
-		}
-
-		home := tui.NewHomeApp(checks, buildStatus(), buildStatus)
-		if flash != "" {
-			home.SetFlash(flash)
-			flash = ""
-		}
-		p := tea.NewProgram(home, tea.WithAltScreen())
-		model, err := p.Run()
-		if err != nil {
+	// Run wizard if config is missing (standalone tea.Program)
+	_, globalErr := maomaoconfig.LoadGlobalConfig(configDir)
+	if globalErr != nil {
+		if err := runWizard(configDir); err != nil {
 			return err
 		}
-
-		h := model.(*tui.HomeApp)
-		action := h.Action()
-		switch action.Kind {
-		case "create":
-			if err := runTaskFromDashboard(configDir, action); err != nil {
-				flash = fmt.Sprintf("task error: %v", err)
-				continue
-			}
-			continue // return to dashboard after task creation
-		case "resume":
-			back, err := launchWorkspace(configDir, action.TaskID)
-			if err != nil {
-				return err
-			}
-			if back {
-				continue // return to dashboard
-			}
-			return nil
-		default:
-			return nil
-		}
 	}
+
+	// Go straight to workspace (no initial task — user picks from sidebar)
+	return launchWorkspace(configDir, "")
+}
+
+func runWizard(configDir string) error {
+	checks := []tui.WizardCheck{
+		{
+			Label:   "Global config",
+			Detail:  "~/.config/maomao/config.toml",
+			OK:      false,
+			Fixable: true,
+			Fix:     func() error { return createGlobalConfig(configDir) },
+		},
+	}
+	wizard := tui.NewWizardApp(checks)
+	p := tea.NewProgram(wizard, tea.WithAltScreen())
+	_, err := p.Run()
+	return err
 }
 
 // launchWorkspace creates and runs the embedded workspace TUI.
-// Returns (true, nil) if the user requested to go back to the dashboard.
-func launchWorkspace(configDir string, initialTaskID string) (backToDash bool, err error) {
+func launchWorkspace(configDir string, initialTaskID string) error {
 	loadTasks := func() []tui.TaskEntry {
 		return buildTaskEntries()
 	}
@@ -197,19 +171,19 @@ func launchWorkspace(configDir string, initialTaskID string) (backToDash bool, e
 		tk.Status = task.StatusActive
 		task.Save(tk)
 
-		globalCfg, _ := mxdconfig.LoadGlobalConfig(configDir)
+		globalCfg, _ := maomaoconfig.LoadGlobalConfig(configDir)
 
 		var panes []tui.PaneInit
 		for _, r := range tk.Repos {
 			agentName := r.Agent
-			var agentConf mxdconfig.AgentConf
+			var agentConf maomaoconfig.AgentConf
 			if globalCfg != nil {
 				if ac, ok := globalCfg.Agents[agentName]; ok {
 					agentConf = ac
 				}
 			}
 			if agentConf.Command == "" {
-				agentConf = mxdconfig.AgentConf{Name: "claude", Command: "claude"}
+				agentConf = maomaoconfig.AgentConf{Name: "claude", Command: "claude"}
 			}
 
 			workDir := r.WorktreeDir
@@ -241,7 +215,7 @@ func launchWorkspace(configDir string, initialTaskID string) (backToDash bool, e
 
 			rp, err := pm.Start(info)
 			if err != nil {
-				mxdlog.Logger.Warn().Err(err).Str("repo", r.Name).Str("key", processKey).Msg("failed to start agent")
+				maomaolog.Logger.Warn().Err(err).Str("repo", r.Name).Str("key", processKey).Msg("failed to start agent")
 				panes = append(panes, tui.PaneInit{RepoName: r.Name, ProcessKey: processKey, WorktreeDir: workDir})
 				continue
 			}
@@ -305,7 +279,7 @@ func launchWorkspace(configDir string, initialTaskID string) (backToDash bool, e
 
 	// Load available repos from scan_dirs
 	loadRepos := func() []tui.RepoEntry {
-		cfg, _ := mxdconfig.LoadGlobalConfig(configDir)
+		cfg, _ := maomaoconfig.LoadGlobalConfig(configDir)
 		if cfg == nil || len(cfg.ScanDirs) == 0 {
 			return nil
 		}
@@ -313,7 +287,11 @@ func launchWorkspace(configDir string, initialTaskID string) (backToDash bool, e
 		var repos []tui.RepoEntry
 		for _, wt := range worktrees {
 			repos = append(repos, tui.RepoEntry{
-				Name: wt.Name, Path: wt.Path, Branch: wt.Branch,
+				Name:        wt.Name,
+				Path:        wt.Path,
+				Branch:      wt.Branch,
+				IsWorktree:  wt.IsWorktree,
+				MainProject: wt.MainProject,
 			})
 		}
 		return repos
@@ -321,7 +299,7 @@ func launchWorkspace(configDir string, initialTaskID string) (backToDash bool, e
 
 	// Create a new task: branch + repo → worktree + persist
 	createTask := func(branch, repoName, repoPath string) (string, error) {
-		globalCfg, _ := mxdconfig.LoadGlobalConfig(configDir)
+		globalCfg, _ := maomaoconfig.LoadGlobalConfig(configDir)
 		agentName := "claude"
 		baseBranch := "main"
 		wtBaseDir := ".worktrees"
@@ -383,7 +361,7 @@ func launchWorkspace(configDir string, initialTaskID string) (backToDash bool, e
 			return nil, err
 		}
 
-		globalCfg, _ := mxdconfig.LoadGlobalConfig(configDir)
+		globalCfg, _ := maomaoconfig.LoadGlobalConfig(configDir)
 		agentName := "claude"
 		baseBranch := "main"
 		wtBaseDir := ".worktrees"
@@ -430,14 +408,14 @@ func launchWorkspace(configDir string, initialTaskID string) (backToDash bool, e
 		})
 
 		// Start agent
-		var agentConf mxdconfig.AgentConf
+		var agentConf maomaoconfig.AgentConf
 		if globalCfg != nil {
 			if ac, ok := globalCfg.Agents[agentName]; ok {
 				agentConf = ac
 			}
 		}
 		if agentConf.Command == "" {
-			agentConf = mxdconfig.AgentConf{Name: "claude", Command: "claude"}
+			agentConf = maomaoconfig.AgentConf{Name: "claude", Command: "claude"}
 		}
 
 		agentCmd := agent.BuildCommand(agentConf, branchName)
@@ -506,14 +484,10 @@ func launchWorkspace(configDir string, initialTaskID string) (backToDash bool, e
 	workspace.SetCallbacks(loadRepos, createTask, addRepoFn, parkTaskFn, deleteTaskFn)
 
 	p := tea.NewProgram(workspace, tea.WithAltScreen(), tea.WithMouseCellMotion())
-	model, err := p.Run()
+	_, err := p.Run()
 	if err != nil {
-		return false, fmt.Errorf("TUI: %w", err)
+		return fmt.Errorf("TUI: %w", err)
 	}
-
-	// Check if user wants to return to dashboard
-	ws := model.(*tui.Workspace)
-	wantBack := ws.BackToDashboard()
 
 	// Save agent logs before stopping processes (all tasks, not just active)
 	for _, rp := range pm.List() {
@@ -536,10 +510,7 @@ func launchWorkspace(configDir string, initialTaskID string) (backToDash bool, e
 	// Park active tasks
 	parkActiveTasks()
 
-	if wantBack {
-		return true, nil
-	}
-	return false, nil
+	return nil
 }
 
 // parkActiveTasks marks all active tasks as parked.
@@ -579,48 +550,10 @@ func buildTaskEntries() []tui.TaskEntry {
 	return entries
 }
 
-func buildStatusData(configDir string) tui.StatusData {
-	globalCfg, globalErr := mxdconfig.LoadGlobalConfig(configDir)
-
-	var agents []tui.AgentEntry
-	if globalCfg != nil {
-		for key, ac := range globalCfg.Agents {
-			agents = append(agents, tui.AgentEntry{
-				Key:       key,
-				Available: agent.Detect(ac),
-			})
-		}
-	}
-
-	// Discover repos from scan_dirs
-	var repos []tui.RepoEntry
-	scanOK := false
-	if globalCfg != nil && len(globalCfg.ScanDirs) > 0 {
-		worktrees := discovery.ScanWorktrees(globalCfg.ScanDirs)
-		for _, wt := range worktrees {
-			repos = append(repos, tui.RepoEntry{
-				Name:   wt.Name,
-				Path:   wt.Path,
-				Branch: wt.Branch,
-			})
-		}
-		scanOK = len(repos) > 0
-	}
-
-	return tui.StatusData{
-		Version:  version,
-		GlobalOK: globalErr == nil,
-		TmuxOK:   true, // tmux no longer required
-		ScanOK:   scanOK,
-		Agents:   agents,
-		Repos:    repos,
-		Tasks:    buildTaskEntries(),
-	}
-}
 
 func runAgents(cmd *cobra.Command, args []string) error {
-	configDir := mxdconfig.GlobalConfigDir()
-	globalCfg, err := mxdconfig.LoadGlobalConfig(configDir)
+	configDir := maomaoconfig.GlobalConfigDir()
+	globalCfg, err := maomaoconfig.LoadGlobalConfig(configDir)
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
@@ -661,12 +594,11 @@ func runTaskList(cmd *cobra.Command, args []string) error {
 }
 
 func runTaskResume(cmd *cobra.Command, args []string) error {
-	configDir := mxdconfig.GlobalConfigDir()
+	configDir := maomaoconfig.GlobalConfigDir()
 	os.MkdirAll(configDir, 0o755)
-	mxdlog.Init(configDir)
+	maomaolog.Init(configDir)
 	event.Init(configDir)
-	_, err := launchWorkspace(configDir, args[0])
-	return err
+	return launchWorkspace(configDir, args[0])
 }
 
 func runTask(cmd *cobra.Command, args []string) error {
@@ -676,29 +608,26 @@ func runTask(cmd *cobra.Command, args []string) error {
 	if len(args) < 2 {
 		return fmt.Errorf("usage: maomao task <branch-name> <repo-path>")
 	}
+	configDir := maomaoconfig.GlobalConfigDir()
+	os.MkdirAll(configDir, 0o755)
+	maomaolog.Init(configDir)
+	event.Init(configDir)
+
 	repoPath, _ := filepath.Abs(args[1])
-	action := tui.HomeAction{
-		Kind:     "create",
-		TaskDesc: args[0],
-		RepoName: filepath.Base(repoPath),
-		RepoPath: repoPath,
+	repoName := filepath.Base(repoPath)
+	branchName := strings.TrimSpace(args[0])
+
+	taskID, err := createTaskDirect(configDir, branchName, repoName, repoPath)
+	if err != nil {
+		return err
 	}
-	configDir := mxdconfig.GlobalConfigDir()
-	return runTaskFromDashboard(configDir, action)
+	return launchWorkspace(configDir, taskID)
 }
 
-func runTaskFromDashboard(configDir string, action tui.HomeAction) error {
-	repoName := action.RepoName
-	repoPath := action.RepoPath
+func createTaskDirect(configDir, branchName, repoName, repoPath string) (string, error) {
+	maomaolog.Logger.Info().Str("branch", branchName).Str("repo", repoName).Msg("task started")
 
-	branchName := strings.TrimSpace(action.TaskDesc)
-
-	os.MkdirAll(configDir, 0o755)
-	mxdlog.Init(configDir)
-	event.Init(configDir)
-	mxdlog.Logger.Info().Str("branch", branchName).Str("repo", repoName).Msg("task started")
-
-	globalCfg, _ := mxdconfig.LoadGlobalConfig(configDir)
+	globalCfg, _ := maomaoconfig.LoadGlobalConfig(configDir)
 	agentName := "claude"
 	baseBranch := "main"
 	wtBaseDir := ".worktrees"
@@ -729,14 +658,9 @@ func runTaskFromDashboard(configDir string, action tui.HomeAction) error {
 	// Worktree dir name: branch slashes → dashes
 	wtName := strings.ReplaceAll(branchName, "/", "-")
 	wtDir := filepath.Join(repoPath, wtBaseDir, wtName)
-	mxdlog.Logger.Info().
-		Str("repo", repoName).
-		Str("branch", branchName).
-		Str("worktree", wtDir).
-		Msg("creating worktree")
 
 	if err := repo.CreateWorktree(repoPath, wtDir, branchName, baseBranch); err != nil {
-		return fmt.Errorf("create worktree: %w", err)
+		return "", fmt.Errorf("create worktree: %w", err)
 	}
 
 	tk := &task.Task{
@@ -755,17 +679,14 @@ func runTaskFromDashboard(configDir string, action tui.HomeAction) error {
 		}},
 	}
 	if err := task.Save(tk); err != nil {
-		mxdlog.Logger.Warn().Err(err).Msg("failed to save task")
+		return "", err
 	}
 	event.Emit(event.New(event.TaskCreated, taskID, repoName, branchName))
-
-	// Launch workspace with the new task
-	_, err := launchWorkspace(configDir, taskID)
-	return err
+	return taskID, nil
 }
 
 func runLogs(cmd *cobra.Command, args []string) error {
-	configDir := mxdconfig.GlobalConfigDir()
+	configDir := maomaoconfig.GlobalConfigDir()
 	event.Init(configDir)
 
 	taskFilter, _ := cmd.Flags().GetString("task")
@@ -806,7 +727,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 	okStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("10"))
 	dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
 
-	configDir := mxdconfig.GlobalConfigDir()
+	configDir := maomaoconfig.GlobalConfigDir()
 	globalPath := filepath.Join(configDir, "config.toml")
 	if _, err := os.Stat(globalPath); err != nil {
 		if err := createGlobalConfig(configDir); err != nil {

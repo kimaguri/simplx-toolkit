@@ -2,71 +2,65 @@ package process
 
 import (
 	"strings"
-	"sync"
 
-	"github.com/hinshun/vt10x"
+	"github.com/charmbracelet/x/ansi"
+	"github.com/charmbracelet/x/vt"
 )
 
-// VTermScreen wraps vt10x to provide a thread-safe virtual terminal screen.
+// VTermScreen wraps charmbracelet/x/vt to provide a thread-safe virtual terminal screen.
 // PTY reader goroutine writes output, TUI goroutine reads screen content.
+// SafeEmulator provides built-in concurrency safety for all operations.
 type VTermScreen struct {
-	mu   sync.RWMutex
-	vt   vt10x.Terminal
+	emu  *vt.SafeEmulator
 	rows int
 	cols int
 }
 
 // NewVTermScreen creates a new virtual terminal with given dimensions.
 func NewVTermScreen(rows, cols int) *VTermScreen {
-	vt := vt10x.New(vt10x.WithSize(cols, rows))
+	emu := vt.NewSafeEmulator(cols, rows)
 	return &VTermScreen{
-		vt:   vt,
+		emu:  emu,
 		rows: rows,
 		cols: cols,
 	}
 }
 
-// Write processes raw terminal output through the VT100 emulator.
+// Write processes raw terminal output through the terminal emulator.
 // Implements io.Writer. Called from the PTY reader goroutine.
 func (s *VTermScreen) Write(p []byte) (int, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.vt.Write(p)
+	return s.emu.Write(p)
 }
 
-// Content returns the current screen content as a string.
+// Content returns the current screen content as plain text (no ANSI codes).
 // Trims trailing whitespace from each line and trailing empty lines.
 func (s *VTermScreen) Content() string {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	rendered := s.emu.Render()
+	plain := ansi.Strip(rendered)
+	return trimScreen(plain)
+}
 
-	var lines []string
-	for y := 0; y < s.rows; y++ {
-		var row strings.Builder
-		for x := 0; x < s.cols; x++ {
-			g := s.vt.Cell(x, y)
-			if g.Char == 0 {
-				row.WriteByte(' ')
-			} else {
-				row.WriteRune(g.Char)
-			}
-		}
-		lines = append(lines, strings.TrimRight(row.String(), " "))
-	}
-
-	// Trim trailing empty lines
-	for len(lines) > 0 && lines[len(lines)-1] == "" {
-		lines = lines[:len(lines)-1]
-	}
-
-	return strings.Join(lines, "\n")
+// Render returns the current screen content with ANSI escape codes preserved.
+// Trims trailing whitespace from each line and trailing empty lines.
+func (s *VTermScreen) Render() string {
+	return s.emu.Render()
 }
 
 // Resize changes the terminal dimensions.
 func (s *VTermScreen) Resize(rows, cols int) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.rows = rows
 	s.cols = cols
-	s.vt.Resize(cols, rows)
+	s.emu.Resize(cols, rows)
+}
+
+// trimScreen trims trailing whitespace from each line and removes trailing empty lines.
+func trimScreen(content string) string {
+	lines := strings.Split(content, "\n")
+	for i, line := range lines {
+		lines[i] = strings.TrimRight(line, " ")
+	}
+	for len(lines) > 0 && lines[len(lines)-1] == "" {
+		lines = lines[:len(lines)-1]
+	}
+	return strings.Join(lines, "\n")
 }

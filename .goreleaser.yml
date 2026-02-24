@@ -17,9 +17,9 @@ builds:
     ldflags:
       - -s -w -X main.version={{.Version}} -X main.commit={{.Commit}}
 
-  - id: mxd
-    main: ./cmd/mxd
-    binary: mxd
+  - id: maomao
+    main: ./cmd/maomao
+    binary: maomao
     env:
       - CGO_ENABLED=0
     goos:
@@ -62,9 +62,9 @@ brews:
     install: |
       bin.install "devdash"
 
-  - name: mxd
+  - name: maomao
     ids:
-      - mxd
+      - maomao
     repository:
       owner: kimaguri
       name: homebrew-simplx-toolkit
@@ -73,7 +73,7 @@ brews:
     homepage: "https://github.com/kimaguri/simplx-toolkit"
     description: "Multi-repo agent orchestrator — manage AI agents across git repositories"
     install: |
-      bin.install "mxd"
+      bin.install "maomao"
 
 release:
   github:
