@@ -224,9 +224,10 @@ func launchWorkspace(configDir string, initialTaskID string) error {
 			panes = append(panes, tui.PaneInit{
 				RepoName:    r.Name,
 				ProcessKey:  processKey,
-				VTerm:       rp.VTerm,
-				PTYWriter:   rp.PtyFile,
+				VTerm:       rp.Terminal(),
+				PTYWriter:   rp.InputWriter(),
 				WorktreeDir: workDir,
+				Scrollback:  rp.ScrollbackSource(),
 			})
 		}
 		return panes, nil
@@ -251,9 +252,13 @@ func launchWorkspace(configDir string, initialTaskID string) error {
 			return &tui.PaneInit{
 				RepoName:   repoName,
 				ProcessKey: processKey,
-				VTerm:      rp.VTerm,
-				PTYWriter:  rp.PtyFile,
+				VTerm:      rp.Terminal(),
+				PTYWriter:  rp.InputWriter(),
+				Scrollback: rp.ScrollbackSource(),
 			}, nil
+		},
+		Resize: func(name string, rows, cols int) {
+			_ = pm.ResizePTY(name, uint16(rows), uint16(cols))
 		},
 	}
 	workspace.SetPaneController(paneCtrl)
@@ -271,9 +276,10 @@ func launchWorkspace(configDir string, initialTaskID string) error {
 		}
 		return &tui.PaneInit{
 			ProcessKey:  info.ProcessKey,
-			VTerm:       rp.VTerm,
-			PTYWriter:   rp.PtyFile,
+			VTerm:       rp.Terminal(),
+			PTYWriter:   rp.InputWriter(),
 			WorktreeDir: info.WorkDir,
+			Scrollback:  rp.ScrollbackSource(),
 		}, nil
 	})
 
@@ -435,9 +441,10 @@ func launchWorkspace(configDir string, initialTaskID string) error {
 		return &tui.PaneInit{
 			RepoName:    repoName,
 			ProcessKey:  processKey,
-			VTerm:       rp.VTerm,
-			PTYWriter:   rp.PtyFile,
+			VTerm:       rp.Terminal(),
+			PTYWriter:   rp.InputWriter(),
 			WorktreeDir: wtDir,
+			Scrollback:  rp.ScrollbackSource(),
 		}, nil
 	}
 

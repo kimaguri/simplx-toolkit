@@ -30,6 +30,7 @@ type PaneInit struct {
 	VTerm       interface{ Render() string } // process.VTermScreen for live refresh
 	PTYWriter   io.Writer                    // PTY master fd for interactive input
 	WorktreeDir string                       // worktree directory for handoff scanning
+	Scrollback  ScrollbackReader             // segmented log for infinite scrollback (optional)
 }
 
 // PaneLauncher spawns a process and returns pane init (for lazygit, etc.)
@@ -47,6 +48,7 @@ type PaneLaunchInfo struct {
 type PaneController struct {
 	Stop    func(name string) error
 	Restart func(name string) (*PaneInit, error)
+	Resize  func(name string, rows, cols int) // resize underlying terminal (tmux/PTY)
 }
 
 // paneRefreshMsg triggers VTerm content refresh for all panes.
@@ -168,10 +170,16 @@ func (w *Workspace) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			w.panes[i].tick++
 			if w.panes[i].vterm != nil {
 				raw := w.panes[i].vterm.Render()
+				// VTerm uses \r\n line separators — strip \r to avoid display corruption
+				raw = strings.ReplaceAll(raw, "\r\n", "\n")
+				raw = strings.ReplaceAll(raw, "\r", "")
 				w.panes[i].content = raw
-				// Clear loading once VTerm produces visible content
-				if w.panes[i].loading && strings.TrimSpace(ansi.Strip(raw)) != "" {
-					w.panes[i].loading = false
+				// Scrollback is fed by sanitized PTY output in readPTY — no TUI-side diff needed
+				if w.panes[i].loading {
+					plain := ansi.Strip(raw)
+					if strings.TrimSpace(plain) != "" {
+						w.panes[i].loading = false
+					}
 				}
 			}
 		}
@@ -205,13 +213,38 @@ func (w *Workspace) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft {
 			return w.handleMouseClick(msg.X, msg.Y)
 		}
-		// Forward scroll wheel to focused pane PTY
-		if w.paneIdx < len(w.panes) && w.panes[w.paneIdx].ptyWriter != nil {
+		// Scroll wheel: use scrollback if available, otherwise forward to PTY
+		if w.paneIdx < len(w.panes) {
+			p := &w.panes[w.paneIdx]
 			switch msg.Button {
 			case tea.MouseButtonWheelUp:
-				w.panes[w.paneIdx].ptyWriter.Write([]byte("\x1b[5~"))
+				if p.scrollback != nil {
+					p.scrollOff += 3
+					// Clamp: can't scroll past the beginning of scrollback
+					total := p.scrollback.Len()
+					visibleH := p.height - 3 // match innerH calc from View()
+					if visibleH < 1 {
+						visibleH = 1
+					}
+					maxOff := total - visibleH
+					if maxOff < 0 {
+						maxOff = 0
+					}
+					if p.scrollOff > maxOff {
+						p.scrollOff = maxOff
+					}
+				} else if p.ptyWriter != nil {
+					p.ptyWriter.Write([]byte("\x1b[5~"))
+				}
 			case tea.MouseButtonWheelDown:
-				w.panes[w.paneIdx].ptyWriter.Write([]byte("\x1b[6~"))
+				if p.scrollback != nil {
+					p.scrollOff -= 3
+					if p.scrollOff < 0 {
+						p.scrollOff = 0
+					}
+				} else if p.ptyWriter != nil {
+					p.ptyWriter.Write([]byte("\x1b[6~"))
+				}
 			}
 		}
 		return w, nil
@@ -304,6 +337,7 @@ func (w *Workspace) updateNavigate(msg tea.KeyMsg) (*Workspace, tea.Cmd) {
 		}
 		w.updateFocusState()
 		w.syncStatusBar()
+		w.resizeTerminals()
 		return w, nil
 	case "tab":
 		// Cycle: sidebar → pane0 → pane1 → ... → sidebar
@@ -444,6 +478,7 @@ func (w *Workspace) updatePaneKeys(msg tea.KeyMsg) (*Workspace, tea.Cmd) {
 	case "f":
 		// Toggle fullscreen for focused pane
 		w.fullscreen = !w.fullscreen
+		w.resizeTerminals()
 	case "p":
 		// Park the active task
 		if w.parkTask != nil && w.activeID != "" {
@@ -667,6 +702,7 @@ func (w *Workspace) handleOverlayResult(msg overlayResultMsg) (*Workspace, tea.C
 				tp.worktreeDir = pi.WorktreeDir
 				tp.vterm = pi.VTerm
 				tp.ptyWriter = pi.PTYWriter
+				tp.scrollback = pi.Scrollback
 				if pi.VTerm != nil {
 					tp.status = paneRunning
 					tp.loading = true
@@ -679,6 +715,8 @@ func (w *Workspace) handleOverlayResult(msg overlayResultMsg) (*Workspace, tea.C
 				w.focus = focusPanes
 				w.updateFocusState()
 				w.syncStatusBar()
+				// Resize terminals to account for new pane layout
+				w.resizeTerminals()
 				// Refresh sidebar to show updated repo count
 				w.refreshSidebar()
 				return w, schedulePaneRefresh()
@@ -902,10 +940,58 @@ func (w *Workspace) View() string {
 	return screen
 }
 
-// SetSize updates all component dimensions.
+// SetSize updates all component dimensions and resizes underlying terminals.
 func (w *Workspace) SetSize(width, height int) {
 	w.width = width
 	w.height = height
+	w.resizeTerminals()
+}
+
+// resizeTerminals propagates pane dimensions to underlying tmux sessions or PTYs.
+// Uses the same sidebar width calculation as View() to ensure consistency.
+// Safe to call frequently — TmuxSession.Resize() deduplicates unchanged dimensions.
+func (w *Workspace) resizeTerminals() {
+	if w.paneCtrl == nil || w.paneCtrl.Resize == nil || len(w.panes) == 0 {
+		return
+	}
+	if w.width == 0 || w.height == 0 {
+		return
+	}
+
+	// Match sidebar width calculation from View()
+	sidebarW := w.width / 4
+	if sidebarW < 20 {
+		sidebarW = 20
+	}
+	if sidebarW > 40 {
+		sidebarW = 40
+	}
+	if w.sidebarHidden {
+		sidebarW = 0
+	}
+
+	rightW := w.width - sidebarW
+	contentH := w.height - 1 // status bar
+	if rightW < 10 || contentH < 5 {
+		return
+	}
+
+	borderCols := 2 // left + right border
+	borderRows := 3 // top + bottom border + title
+
+	if w.fullscreen && w.paneIdx < len(w.panes) {
+		p := w.panes[w.paneIdx]
+		if p.processKey != "" && p.status == paneRunning {
+			w.paneCtrl.Resize(p.processKey, contentH-borderRows, rightW-borderCols)
+		}
+	} else {
+		paneW := rightW / len(w.panes)
+		for _, p := range w.panes {
+			if p.processKey != "" && p.status == paneRunning {
+				w.paneCtrl.Resize(p.processKey, contentH-borderRows, paneW-borderCols)
+			}
+		}
+	}
 }
 
 func (w *Workspace) refreshSidebar() {
@@ -996,6 +1082,8 @@ func (w *Workspace) openTask(task TaskEntry) tea.Cmd {
 		w.focus = focusPanes
 		w.updateFocusState()
 		w.syncStatusBar()
+		// Resize terminals to match current TUI dimensions (they start at default 80x24)
+		w.resizeTerminals()
 		return tea.Batch(schedulePaneRefresh(), scheduleHandoffScan())
 	}
 
@@ -1021,6 +1109,7 @@ func (w *Workspace) launchAllRepos(taskID string) {
 		tp.worktreeDir = p.WorktreeDir
 		tp.vterm = p.VTerm
 		tp.ptyWriter = p.PTYWriter
+		tp.scrollback = p.Scrollback
 		if p.VTerm != nil {
 			tp.status = paneRunning
 			tp.loading = true
@@ -1059,6 +1148,7 @@ func (w *Workspace) reopenMissing(taskID string) {
 		tp.worktreeDir = p.WorktreeDir
 		tp.vterm = p.VTerm
 		tp.ptyWriter = p.PTYWriter
+		tp.scrollback = p.Scrollback
 		if p.VTerm != nil {
 			tp.status = paneRunning
 			tp.loading = true

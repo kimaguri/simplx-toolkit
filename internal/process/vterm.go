@@ -10,6 +10,10 @@ import (
 // VTermScreen wraps charmbracelet/x/vt to provide a thread-safe virtual terminal screen.
 // PTY reader goroutine writes output, TUI goroutine reads screen content.
 // SafeEmulator provides built-in concurrency safety for all operations.
+//
+// VTermScreen is a pure display component — it does NOT manage scrollback.
+// Scrollback is handled separately by feeding sanitized PTY output directly
+// into a SegmentedLog via the readPTY pipeline.
 type VTermScreen struct {
 	emu  *vt.SafeEmulator
 	rows int
@@ -44,6 +48,35 @@ func (s *VTermScreen) Content() string {
 // Trims trailing whitespace from each line and trailing empty lines.
 func (s *VTermScreen) Render() string {
 	return s.emu.Render()
+}
+
+// RenderedLines returns each VTerm row as a separate string with ANSI codes preserved.
+// Trailing whitespace and \r are trimmed from each line. Trailing empty lines are removed.
+func (s *VTermScreen) RenderedLines() []string {
+	rendered := s.emu.Render()
+	lines := strings.Split(rendered, "\n")
+	for i, line := range lines {
+		lines[i] = strings.TrimRight(line, " \r")
+	}
+	for len(lines) > 0 && lines[len(lines)-1] == "" {
+		lines = lines[:len(lines)-1]
+	}
+	return lines
+}
+
+// PlainLines returns each VTerm row as plain text (no ANSI codes).
+// Trailing whitespace and \r are trimmed from each line. Trailing empty lines are removed.
+func (s *VTermScreen) PlainLines() []string {
+	rendered := s.emu.Render()
+	plain := ansi.Strip(rendered)
+	lines := strings.Split(plain, "\n")
+	for i, line := range lines {
+		lines[i] = strings.TrimRight(line, " \r")
+	}
+	for len(lines) > 0 && lines[len(lines)-1] == "" {
+		lines = lines[:len(lines)-1]
+	}
+	return lines
 }
 
 // Resize changes the terminal dimensions.

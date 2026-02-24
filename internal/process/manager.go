@@ -39,15 +39,49 @@ func (s ProcessStatus) String() string {
 type RunningProcess struct {
 	Info      SessionInfo
 	Cmd       *exec.Cmd
-	LogBuf    *LogBuffer
+	LogBuf    *SegmentedLog
 	Status    ProcessStatus
 	StartedAt time.Time
-	PtyFile   *os.File      // PTY master fd (nil for reconnected processes)
-	VTerm     *VTermScreen  // Virtual terminal screen (nil for reconnected)
-	Tunnel    *TunnelInfo   // Cloudflare tunnel (nil if none)
-	done      chan struct{}  // closed when process exits (by waitForExit)
-	tailStop  chan struct{}  // closed to stop the tail goroutine
-	logFile   *os.File      // log file handle (for started processes)
+	PtyFile   *os.File         // PTY master fd (nil for reconnected processes)
+	VTerm     *VTermScreen     // Virtual terminal screen (nil for reconnected)
+	Tunnel    *TunnelInfo      // Cloudflare tunnel (nil if none)
+	tmux      *TmuxSession     // non-nil when using tmux backend
+	done      chan struct{}     // closed when process exits (by waitForExit)
+	tailStop  chan struct{}     // closed to stop the tail goroutine
+	logFile   *os.File         // log file handle (for started processes)
+	scrollCap *ScrollCapture   // VTerm scroll capture (nil for reconnected)
+}
+
+// Terminal returns the display renderer (TmuxSession or VTermScreen).
+// Satisfies interface{ Render() string } for PaneInit.VTerm slot.
+func (rp *RunningProcess) Terminal() interface{ Render() string } {
+	if rp.tmux != nil {
+		return rp.tmux
+	}
+	return rp.VTerm
+}
+
+// InputWriter returns the io.Writer for sending input (TmuxSession or PTY fd).
+func (rp *RunningProcess) InputWriter() io.Writer {
+	if rp.tmux != nil {
+		return rp.tmux
+	}
+	if rp.PtyFile != nil {
+		return rp.PtyFile
+	}
+	return nil
+}
+
+// ScrollbackSource returns the ScrollbackReader (TmuxSession or SegmentedLog).
+// Named ScrollbackSource to avoid collision with the ScrollbackReader interface.
+func (rp *RunningProcess) ScrollbackSource() interface {
+	Len() int
+	ReadRange(start, end int) []string
+} {
+	if rp.tmux != nil {
+		return rp.tmux
+	}
+	return rp.LogBuf
 }
 
 // ProcessManager manages the lifecycle of dev processes
@@ -90,7 +124,46 @@ func (pm *ProcessManager) Start(info SessionInfo) (*RunningProcess, error) {
 		return nil, fmt.Errorf("process %q already running", info.Name)
 	}
 
-	// Create log file — stdout/stderr go here (survives TUI restart)
+	scrollbackDir := filepath.Join(pm.logsDir, "scrollback", SafeName(info.Name))
+	logBuf := NewSegmentedLog(scrollbackDir, DefaultMaxLines)
+	logBuf.Reset() // Clear stale scrollback from previous sessions
+
+	// Try tmux first, fall back to PTY+VTerm+ScrollCapture
+	if IsTmuxAvailable() {
+		// Create log file for pipe-pane output
+		if err := os.MkdirAll(pm.logsDir, 0o755); err == nil {
+			logPath := pm.logFilePath(info.Name)
+			if logFile, err := os.Create(logPath); err == nil {
+				logFile.Close() // pipe-pane will append to this file
+
+				ts, err := StartTmuxSession(info.Name, int(defaultPTYRows), int(defaultPTYCols),
+					info.Command, info.Args, info.WorkDir, info.ExtraEnv, logPath, logBuf)
+				if err == nil {
+					info.StartedAt = time.Now().Unix()
+					if err := SaveSession(pm.sessionsDir, info); err != nil {
+						_, _ = fmt.Fprintf(os.Stderr, "warning: failed to save session %q: %v\n", info.Name, err)
+					}
+
+					done := make(chan struct{})
+					rp := &RunningProcess{
+						Info:      info,
+						LogBuf:    logBuf,
+						Status:    StatusRunning,
+						StartedAt: time.Unix(info.StartedAt, 0),
+						tmux:      ts,
+						done:      done,
+					}
+					pm.processes[info.Name] = rp
+
+					go pm.waitForTmuxExit(info.Name, ts, done)
+					return rp, nil
+				}
+			}
+		}
+		// tmux failed, fall through to PTY path
+	}
+
+	// Fallback: PTY+VTerm+ScrollCapture
 	if err := os.MkdirAll(pm.logsDir, 0o755); err != nil {
 		return nil, fmt.Errorf("failed to create logs dir: %w", err)
 	}
@@ -120,7 +193,7 @@ func (pm *ProcessManager) Start(info SessionInfo) (*RunningProcess, error) {
 		_, _ = fmt.Fprintf(os.Stderr, "warning: failed to save session %q: %v\n", info.Name, err)
 	}
 
-	logBuf := NewLogBuffer(DefaultMaxLines)
+	scrollCap := NewScrollCapture(int(defaultPTYRows), logBuf)
 	tailStop := make(chan struct{})
 	done := make(chan struct{})
 
@@ -135,11 +208,12 @@ func (pm *ProcessManager) Start(info SessionInfo) (*RunningProcess, error) {
 		done:      done,
 		tailStop:  tailStop,
 		logFile:   logFile,
+		scrollCap: scrollCap,
 	}
 	pm.processes[info.Name] = rp
 
-	// Read PTY output into logFile + VTerm + LogBuffer
-	go readPTY(ptyFile, logFile, vterm, logBuf, tailStop)
+	// Read PTY output into logFile + VTerm (via scroll capture)
+	go readPTY(ptyFile, logFile, vterm, scrollCap, tailStop)
 
 	// Wait for process exit
 	go pm.waitForExit(info.Name, cmd, logFile, done, tailStop, ptyFile)
@@ -174,9 +248,44 @@ func (pm *ProcessManager) waitForExit(name string, cmd *exec.Cmd, logFile *os.Fi
 		rp.Tunnel = nil
 	}
 
+	// Flush VTerm's final screen content to scrollback history
+	if rp.scrollCap != nil && rp.VTerm != nil {
+		rp.scrollCap.Flush(rp.VTerm)
+	}
+
 	if err != nil {
 		rp.Status = StatusError
 		rp.LogBuf.Write([]byte(fmt.Sprintf("\n[process exited with error: %v]\n", err)))
+	} else {
+		rp.Status = StatusStopped
+		rp.LogBuf.Write([]byte("\n[process exited normally]\n"))
+	}
+	rp.LogBuf.Flush()
+}
+
+// waitForTmuxExit waits for the tmux-backed process to exit and updates its status.
+func (pm *ProcessManager) waitForTmuxExit(name string, ts *TmuxSession, done chan struct{}) {
+	<-ts.Done()
+	close(done)
+
+	pm.mu.Lock()
+	defer pm.mu.Unlock()
+
+	rp, exists := pm.processes[name]
+	if !exists {
+		return
+	}
+
+	// Stop tunnel if process exits on its own
+	if rp.Tunnel != nil {
+		StopTunnel(rp.Tunnel)
+		rp.Tunnel = nil
+	}
+
+	exitCode := ts.ExitCode()
+	if exitCode != 0 {
+		rp.Status = StatusError
+		rp.LogBuf.Write([]byte(fmt.Sprintf("\n[process exited with code %d]\n", exitCode)))
 	} else {
 		rp.Status = StatusStopped
 		rp.LogBuf.Write([]byte("\n[process exited normally]\n"))
@@ -200,7 +309,10 @@ func (pm *ProcessManager) Stop(name string) error {
 		rp.Tunnel = nil
 	}
 
-	if rp.Status == StatusRunning && rp.Cmd != nil && rp.Cmd.Process != nil {
+	if rp.tmux != nil {
+		rp.tmux.Kill()
+		<-rp.done
+	} else if rp.Status == StatusRunning && rp.Cmd != nil && rp.Cmd.Process != nil {
 		pgid, err := syscall.Getpgid(rp.Cmd.Process.Pid)
 		if err == nil {
 			_ = syscall.Kill(-pgid, syscall.SIGTERM)
@@ -260,6 +372,40 @@ func (pm *ProcessManager) Reconnect() []*RunningProcess {
 
 	var reconnected []*RunningProcess
 	for _, info := range sessions {
+		scrollbackDir := filepath.Join(pm.logsDir, "scrollback", SafeName(info.Name))
+		logBuf := NewSegmentedLog(scrollbackDir, DefaultMaxLines)
+
+		// Try tmux reconnection first
+		if IsTmuxAvailable() {
+			logPath := pm.logFilePath(info.Name)
+			var startOffset int64
+			if fi, err := os.Stat(logPath); err == nil {
+				startOffset = fi.Size()
+			}
+
+			ts, err := ReconnectTmuxSession(info.Name, logPath, startOffset, logBuf)
+			if err == nil {
+				done := make(chan struct{})
+				rp := &RunningProcess{
+					Info:      info,
+					LogBuf:    logBuf,
+					Status:    StatusRunning,
+					StartedAt: time.Unix(info.StartedAt, 0),
+					tmux:      ts,
+					done:      done,
+				}
+
+				go pm.waitForTmuxExit(info.Name, ts, done)
+
+				pm.mu.Lock()
+				pm.processes[info.Name] = rp
+				pm.mu.Unlock()
+				reconnected = append(reconnected, rp)
+				continue
+			}
+		}
+
+		// Fallback: PTY reconnection via log tailing
 		if !IsProcessAlive(info.PID) {
 			_ = RemoveSession(pm.sessionsDir, info.Name)
 			continue
@@ -271,19 +417,16 @@ func (pm *ProcessManager) Reconnect() []*RunningProcess {
 			continue
 		}
 
-		logBuf := NewLogBuffer(DefaultMaxLines)
 		tailStop := make(chan struct{})
 
-		// Read previous log content from file (sanitize raw PTY output)
+		// Segments already on disk from previous session.
+		// Tail the raw log file for new output from current file end.
 		logPath := pm.logFilePath(info.Name)
 		var startOffset int64
-		if data, err := os.ReadFile(logPath); err == nil && len(data) > 0 {
-			logBuf.Write(sanitizeForLog(data))
-			logBuf.Flush()
-			startOffset = int64(len(data))
+		if fi, err := os.Stat(logPath); err == nil {
+			startOffset = fi.Size()
 		}
 
-		// Continue tailing the log file for new output
 		go tailFile(logPath, logBuf, startOffset, tailStop)
 
 		rp := &RunningProcess{
@@ -369,7 +512,14 @@ func (pm *ProcessManager) ResizePTY(name string, rows, cols uint16) error {
 	pm.mu.RLock()
 	defer pm.mu.RUnlock()
 	rp := pm.processes[name]
-	if rp == nil || rp.PtyFile == nil {
+	if rp == nil {
+		return fmt.Errorf("process %q not found", name)
+	}
+	if rp.tmux != nil {
+		rp.tmux.Resize(int(rows), int(cols))
+		return nil
+	}
+	if rp.PtyFile == nil {
 		return fmt.Errorf("process %q has no PTY", name)
 	}
 	if err := resizePTY(rp.PtyFile, rows, cols); err != nil {
@@ -442,18 +592,18 @@ func (pm *ProcessManager) Get(name string) *RunningProcess {
 	return pm.processes[name]
 }
 
-// readPTY reads from PTY master and writes to logFile + VTerm + LogBuffer.
-// logFile and VTerm get raw output; LogBuffer gets sanitized output
-// (cursor movement and screen control stripped, colors preserved).
-func readPTY(ptyFile *os.File, logFile *os.File, vterm *VTermScreen, logBuf *LogBuffer, stop <-chan struct{}) {
+// readPTY reads from PTY master and writes to logFile + VTerm via ScrollCapture.
+// logFile gets raw output for disk persistence.
+// ScrollCapture feeds data to VTerm in sub-chunks and captures scrolled-off
+// lines as rendered text to the SegmentedLog history.
+func readPTY(ptyFile *os.File, logFile *os.File, vterm *VTermScreen, sc *ScrollCapture, stop <-chan struct{}) {
 	buf := make([]byte, 4096)
 	for {
 		n, err := ptyFile.Read(buf)
 		if n > 0 {
 			data := buf[:n]
 			logFile.Write(data)
-			vterm.Write(data)
-			logBuf.Write(sanitizeForLog(data))
+			sc.ProcessChunk(vterm, data)
 		}
 		if err != nil {
 			return

@@ -1,12 +1,20 @@
 package tui
 
 import (
+	"fmt"
 	"io"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 )
+
+// ScrollbackReader provides access to historical log lines for scrollback.
+type ScrollbackReader interface {
+	Len() int
+	ReadRange(start, end int) []string
+}
 
 type paneStatus int
 
@@ -44,7 +52,9 @@ type termPaneModel struct {
 	content     string                      // rendered terminal content (ANSI)
 	ptyWriter   io.Writer                   // PTY master fd for input (nil if no process)
 	vterm       interface{ Render() string } // VTermScreen for live refresh
-	colorIdx    int                         // index into paneColorPalette
+	scrollback        ScrollbackReader  // segmented log for infinite scrollback
+	scrollOff         int               // lines scrolled back from bottom (0 = live)
+	colorIdx          int               // index into paneColorPalette
 	tick        int                         // animation tick counter (incremented by workspace refresh)
 	loading     bool                        // true until meaningful visible content arrives
 }
@@ -162,7 +172,11 @@ func (p termPaneModel) View() string {
 	case p.status == paneError:
 		body = lipgloss.NewStyle().Foreground(catRed).Render("  error")
 	default:
-		body = p.content
+		if p.scrollOff > 0 && p.scrollback != nil {
+			body = p.renderScrollback(innerH)
+		} else {
+			body = p.content
+		}
 	}
 
 	// Content area with side borders
@@ -185,12 +199,21 @@ func (p termPaneModel) View() string {
 		bordered = append(bordered, leftBorder+line+strings.Repeat(" ", pad)+rightBorder)
 	}
 
-	// Bottom border
-	bottomFill := p.width - 2
-	if bottomFill < 0 {
-		bottomFill = 0
+	// Bottom border with optional scroll indicator
+	var scrollIndicator string
+	if p.scrollOff > 0 {
+		scrollIndicator = lipgloss.NewStyle().Foreground(lipgloss.Color("#7aa2f7")).
+			Render(fmt.Sprintf(" ↑%d ", p.scrollOff))
 	}
-	bottomBar := borderSt.Render("╰" + strings.Repeat("─", bottomFill) + "╯")
+
+	bottomLeft := borderSt.Render("╰─")
+	bottomRight := borderSt.Render("─╯")
+	indicatorW := lipgloss.Width(scrollIndicator)
+	bottomFillLen := p.width - lipgloss.Width(bottomLeft) - lipgloss.Width(bottomRight) - indicatorW
+	if bottomFillLen < 0 {
+		bottomFillLen = 0
+	}
+	bottomBar := bottomLeft + scrollIndicator + borderSt.Render(strings.Repeat("─", bottomFillLen)) + bottomRight
 
 	return titleBar + "\n" + strings.Join(bordered, "\n") + "\n" + bottomBar
 }
@@ -200,6 +223,33 @@ func (p *termPaneModel) SetSize(height, width int) {
 	p.height = height
 	p.width = width
 }
+
+// renderScrollback renders historical lines from the scrollback buffer.
+func (p *termPaneModel) renderScrollback(visibleLines int) string {
+	total := p.scrollback.Len()
+	end := total - p.scrollOff
+	if end < 0 {
+		end = 0
+	}
+	start := end - visibleLines
+	if start < 0 {
+		start = 0
+	}
+	lines := p.scrollback.ReadRange(start, end)
+
+	// Truncate lines to pane width to prevent overflow
+	innerW := p.width - 2 // subtract border columns
+	if innerW < 1 {
+		innerW = 1
+	}
+	for i, line := range lines {
+		if lipgloss.Width(line) > innerW {
+			lines[i] = ansi.Truncate(line, innerW, "")
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
 
 func keyMsgToBytes(msg tea.KeyMsg) []byte {
 	// Alt modifier: prefix with ESC for common combos
