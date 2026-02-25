@@ -26,28 +26,38 @@ type LaunchRequestMsg struct {
 type launcherStep int
 
 const (
-	stepWorktree launcherStep = iota
-	stepProject
-	stepScript
-	stepPort
-	stepConfirm
+	stepRepo      launcherStep = iota // select main project (repos only)
+	stepDirectory                     // select working directory (main + worktrees)
+	stepModule                        // select module within directory
+	stepScript                        // select npm script
+	stepPort                          // set port
+	stepConfirm                       // confirm launch
 )
 
 // launcherModel is a multi-step launch wizard popup
 type launcherModel struct {
-	step        launcherStep
-	worktrees   []discovery.Worktree
-	projects    []discovery.Project
-	wtProjects  [][]discovery.Project // pre-detected projects per worktree
-	portMap     map[string]int        // port overrides from config
-	wtIndex     int
-	projIndex   int
-	scripts     []string // scripts for currently selected project
-	scriptIndex int      // selected script index
-	portInput   textinput.Model
-	portFixed   bool // true if port is hardcoded in project config
-	width       int
-	height      int
+	step         launcherStep
+	allWorktrees []discovery.Worktree  // full list (for worktree lookup)
+	// Step 1: main repos
+	mainRepos    []discovery.Worktree  // only IsWorktree=false, with projects
+	repoIndex    int
+	// Step 2: directories for selected project
+	directories  []discovery.Worktree  // main dir + worktrees, filtered to those with projects
+	dirProjects  [][]discovery.Project // pre-detected projects per directory
+	dirIndex     int
+	// Step 3: modules
+	projects     []discovery.Project
+	projIndex    int
+	// Step 4: scripts
+	scripts      []string
+	scriptIndex  int
+	// Step 5: port
+	portInput    textinput.Model
+	portFixed    bool
+	portMap      map[string]int
+	// layout
+	width        int
+	height       int
 }
 
 // newLauncherModel creates a new launch wizard
@@ -57,31 +67,28 @@ func newLauncherModel(worktrees []discovery.Worktree, portOverrides map[string]i
 	ti.Width = 10
 	ti.CharLimit = 5
 
-	// Sort: main repos first, then worktrees; each group by last modified desc
-	sort.SliceStable(worktrees, func(i, j int) bool {
-		if worktrees[i].IsWorktree != worktrees[j].IsWorktree {
-			return !worktrees[i].IsWorktree // main repos first
-		}
-		return worktrees[i].LastModified.After(worktrees[j].LastModified)
-	})
-
-	// Pre-detect projects for each worktree and filter out empty ones
-	var filtered []discovery.Worktree
-	var filteredProjects [][]discovery.Project
+	// Separate main repos from worktrees, filter to those with projects
+	var mainRepos []discovery.Worktree
 	for _, wt := range worktrees {
-		projects := discovery.DetectProjects(wt)
-		if len(projects) > 0 {
-			filtered = append(filtered, wt)
-			filteredProjects = append(filteredProjects, projects)
+		if !wt.IsWorktree {
+			projects := discovery.DetectProjects(wt)
+			if len(projects) > 0 {
+				mainRepos = append(mainRepos, wt)
+			}
 		}
 	}
 
+	// Sort main repos by last modified desc
+	sort.SliceStable(mainRepos, func(i, j int) bool {
+		return mainRepos[i].LastModified.After(mainRepos[j].LastModified)
+	})
+
 	return launcherModel{
-		step:       stepWorktree,
-		worktrees:  filtered,
-		wtProjects: filteredProjects,
-		portMap:    portOverrides,
-		portInput:  ti,
+		step:         stepRepo,
+		allWorktrees: worktrees,
+		mainRepos:    mainRepos,
+		portMap:      portOverrides,
+		portInput:    ti,
 	}
 }
 
@@ -96,13 +103,15 @@ func (m launcherModel) Update(msg tea.Msg) (launcherModel, tea.Cmd) {
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "esc":
-			if m.step == stepWorktree {
+			if m.step == stepRepo {
 				return m, func() tea.Msg { return cancelLauncherMsg{} }
 			}
-			// Skip script step when going back from port for Encore projects without scripts
-			if m.step == stepPort && m.projIndex < len(m.projects) &&
+			// Skip directory step when going back if it was auto-skipped
+			if m.step == stepModule && len(m.directories) <= 1 {
+				m.step = stepRepo
+			} else if m.step == stepPort && m.projIndex < len(m.projects) &&
 				m.projects[m.projIndex].IsEncore && len(m.projects[m.projIndex].Scripts) == 0 {
-				m.step = stepProject
+				m.step = stepModule
 			} else {
 				m.step--
 			}
@@ -139,144 +148,208 @@ func (m launcherModel) Update(msg tea.Msg) (launcherModel, tea.Cmd) {
 // cancelLauncherMsg signals the launcher should close without action
 type cancelLauncherMsg struct{}
 
+// selectedWorktree returns the currently selected directory (worktree).
+func (m launcherModel) selectedWorktree() discovery.Worktree {
+	if m.dirIndex < len(m.directories) {
+		return m.directories[m.dirIndex]
+	}
+	if m.repoIndex < len(m.mainRepos) {
+		return m.mainRepos[m.repoIndex]
+	}
+	return discovery.Worktree{}
+}
+
 // advance moves to the next step or confirms the launch
 func (m launcherModel) advance() (launcherModel, tea.Cmd) {
 	switch m.step {
-	case stepWorktree:
-		if len(m.worktrees) == 0 {
-			return m, nil
-		}
-		// Use pre-detected projects
-		if m.wtIndex < len(m.wtProjects) {
-			m.projects = m.wtProjects[m.wtIndex]
-		} else {
-			m.projects = discovery.DetectProjects(m.worktrees[m.wtIndex])
-		}
-		m.projIndex = 0
-		m.step = stepProject
-		return m, nil
-
-	case stepProject:
-		if len(m.projects) == 0 {
-			return m, nil
-		}
-		proj := m.projects[m.projIndex]
-
-		// For Encore projects without package.json scripts, skip to port
-		if proj.IsEncore && len(proj.Scripts) == 0 {
-			wt := m.worktrees[m.wtIndex]
-			key := config.PortKey(wt.Name, proj.Name)
-			m.portFixed = false
-			if savedPort, ok := m.portMap[key]; ok && savedPort > 0 {
-				m.portInput.SetValue(fmt.Sprintf("%d", savedPort))
-			} else {
-				m.portInput.SetValue("3000")
-			}
-			m.portInput.Focus()
-			m.scripts = nil
-			m.scriptIndex = 0
-			m.step = stepPort
-			return m, textinput.Blink
-		}
-
-		m.scripts = proj.Scripts
-		m.scriptIndex = 0 // dev/start already sorted first
-		m.step = stepScript
-		return m, nil
-
+	case stepRepo:
+		return m.advanceFromRepo()
+	case stepDirectory:
+		return m.advanceFromDirectory()
+	case stepModule:
+		return m.advanceFromModule()
 	case stepScript:
-		wt := m.worktrees[m.wtIndex]
-		proj := m.projects[m.projIndex]
-
-		m.portFixed = proj.PortFixed
-		if proj.PortFixed && proj.DetectedPort > 0 {
-			// Hardcoded port — show as read-only
-			m.portInput.SetValue(fmt.Sprintf("%d", proj.DetectedPort))
-		} else {
-			// Check for saved port override, then detected default, then 3000
-			key := config.PortKey(wt.Name, proj.Name)
-			if savedPort, ok := m.portMap[key]; ok && savedPort > 0 {
-				m.portInput.SetValue(fmt.Sprintf("%d", savedPort))
-			} else if proj.DetectedPort > 0 {
-				m.portInput.SetValue(fmt.Sprintf("%d", proj.DetectedPort))
-			} else {
-				m.portInput.SetValue("3000")
-			}
-		}
-		if !m.portFixed {
-			m.portInput.Focus()
-		}
-		m.step = stepPort
-		if m.portFixed {
-			return m, nil
-		}
-		return m, textinput.Blink
-
+		return m.advanceFromScript()
 	case stepPort:
 		m.step = stepConfirm
 		m.portInput.Blur()
 		return m, nil
-
 	case stepConfirm:
-		if len(m.worktrees) == 0 || len(m.projects) == 0 {
-			return m, nil
-		}
-		wt := m.worktrees[m.wtIndex]
-		proj := m.projects[m.projIndex]
+		return m.advanceFromConfirm()
+	}
+	return m, nil
+}
 
-		port := 3000
-		if v := m.portInput.Value(); v != "" {
-			if p := parsePort(v); p > 0 {
-				port = p
-			}
-		}
+func (m launcherModel) advanceFromRepo() (launcherModel, tea.Cmd) {
+	if len(m.mainRepos) == 0 {
+		return m, nil
+	}
+	selectedRepo := m.mainRepos[m.repoIndex]
 
-		script := ""
-		if m.scriptIndex < len(m.scripts) {
-			script = m.scripts[m.scriptIndex]
-		}
+	// Build directory list: main dir + worktrees belonging to this project
+	dirs := []discovery.Worktree{selectedRepo}
+	var dirProjects [][]discovery.Project
+	dirProjects = append(dirProjects, discovery.DetectProjects(selectedRepo))
 
-		return m, func() tea.Msg {
-			return LaunchRequestMsg{
-				Worktree:       wt,
-				Project:        proj,
-				Port:           port,
-				Script:         script,
-				PackageManager: proj.PackageManager,
+	for _, wt := range m.allWorktrees {
+		if wt.IsWorktree && wt.MainProject == selectedRepo.Name {
+			projects := discovery.DetectProjects(wt)
+			if len(projects) > 0 {
+				dirs = append(dirs, wt)
+				dirProjects = append(dirProjects, projects)
 			}
 		}
 	}
+
+	m.directories = dirs
+	m.dirProjects = dirProjects
+	m.dirIndex = 0
+
+	// Auto-skip directory step if only main dir exists
+	if len(dirs) == 1 {
+		m.projects = dirProjects[0]
+		m.projIndex = 0
+		m.step = stepModule
+		return m, nil
+	}
+	m.step = stepDirectory
 	return m, nil
+}
+
+func (m launcherModel) advanceFromDirectory() (launcherModel, tea.Cmd) {
+	if len(m.directories) == 0 {
+		return m, nil
+	}
+	if m.dirIndex < len(m.dirProjects) {
+		m.projects = m.dirProjects[m.dirIndex]
+	} else {
+		m.projects = discovery.DetectProjects(m.directories[m.dirIndex])
+	}
+	m.projIndex = 0
+	m.step = stepModule
+	return m, nil
+}
+
+func (m launcherModel) advanceFromModule() (launcherModel, tea.Cmd) {
+	if len(m.projects) == 0 {
+		return m, nil
+	}
+	proj := m.projects[m.projIndex]
+
+	if proj.IsEncore && len(proj.Scripts) == 0 {
+		dir := m.selectedWorktree()
+		key := config.PortKey(dir.Name, proj.Name)
+		m.portFixed = false
+		if savedPort, ok := m.portMap[key]; ok && savedPort > 0 {
+			m.portInput.SetValue(fmt.Sprintf("%d", savedPort))
+		} else {
+			m.portInput.SetValue("3000")
+		}
+		m.portInput.Focus()
+		m.scripts = nil
+		m.scriptIndex = 0
+		m.step = stepPort
+		return m, textinput.Blink
+	}
+
+	m.scripts = proj.Scripts
+	m.scriptIndex = 0
+	m.step = stepScript
+	return m, nil
+}
+
+func (m launcherModel) advanceFromScript() (launcherModel, tea.Cmd) {
+	dir := m.selectedWorktree()
+	proj := m.projects[m.projIndex]
+
+	m.portFixed = proj.PortFixed
+	if proj.PortFixed && proj.DetectedPort > 0 {
+		m.portInput.SetValue(fmt.Sprintf("%d", proj.DetectedPort))
+	} else {
+		key := config.PortKey(dir.Name, proj.Name)
+		if savedPort, ok := m.portMap[key]; ok && savedPort > 0 {
+			m.portInput.SetValue(fmt.Sprintf("%d", savedPort))
+		} else if proj.DetectedPort > 0 {
+			m.portInput.SetValue(fmt.Sprintf("%d", proj.DetectedPort))
+		} else {
+			m.portInput.SetValue("3000")
+		}
+	}
+	if !m.portFixed {
+		m.portInput.Focus()
+	}
+	m.step = stepPort
+	if m.portFixed {
+		return m, nil
+	}
+	return m, textinput.Blink
+}
+
+func (m launcherModel) advanceFromConfirm() (launcherModel, tea.Cmd) {
+	if len(m.directories) == 0 || len(m.projects) == 0 {
+		return m, nil
+	}
+	wt := m.selectedWorktree()
+	proj := m.projects[m.projIndex]
+
+	port := 3000
+	if v := m.portInput.Value(); v != "" {
+		if p := parsePort(v); p > 0 {
+			port = p
+		}
+	}
+
+	script := ""
+	if m.scriptIndex < len(m.scripts) {
+		script = m.scripts[m.scriptIndex]
+	}
+
+	return m, func() tea.Msg {
+		return LaunchRequestMsg{
+			Worktree:       wt,
+			Project:        proj,
+			Port:           port,
+			Script:         script,
+			PackageManager: proj.PackageManager,
+		}
+	}
 }
 
 // moveSelection navigates the current list
 func (m *launcherModel) moveSelection(delta int) {
 	switch m.step {
-	case stepWorktree:
-		m.wtIndex += delta
-		if m.wtIndex < 0 {
-			m.wtIndex = 0
+	case stepRepo:
+		if len(m.mainRepos) == 0 {
+			return
 		}
-		if m.wtIndex >= len(m.worktrees) {
-			m.wtIndex = len(m.worktrees) - 1
+		m.repoIndex = clampIndex(m.repoIndex+delta, len(m.mainRepos))
+	case stepDirectory:
+		if len(m.directories) == 0 {
+			return
 		}
-	case stepProject:
-		m.projIndex += delta
-		if m.projIndex < 0 {
-			m.projIndex = 0
+		m.dirIndex = clampIndex(m.dirIndex+delta, len(m.directories))
+	case stepModule:
+		if len(m.projects) == 0 {
+			return
 		}
-		if m.projIndex >= len(m.projects) {
-			m.projIndex = len(m.projects) - 1
-		}
+		m.projIndex = clampIndex(m.projIndex+delta, len(m.projects))
 	case stepScript:
-		m.scriptIndex += delta
-		if m.scriptIndex < 0 {
-			m.scriptIndex = 0
+		if len(m.scripts) == 0 {
+			return
 		}
-		if m.scriptIndex >= len(m.scripts) {
-			m.scriptIndex = len(m.scripts) - 1
-		}
+		m.scriptIndex = clampIndex(m.scriptIndex+delta, len(m.scripts))
 	}
+}
+
+// clampIndex keeps idx within [0, length-1]
+func clampIndex(idx, length int) int {
+	if idx < 0 {
+		return 0
+	}
+	if idx >= length {
+		return length - 1
+	}
+	return idx
 }
 
 // View renders the launcher popup
@@ -293,10 +366,12 @@ func (m launcherModel) View() string {
 	var body string
 
 	switch m.step {
-	case stepWorktree:
-		body = m.renderWorktreeList(maxWidth - 6)
-	case stepProject:
-		body = m.renderProjectList(maxWidth - 6)
+	case stepRepo:
+		body = m.renderRepoList(maxWidth - 6)
+	case stepDirectory:
+		body = m.renderDirectoryList(maxWidth - 6)
+	case stepModule:
+		body = m.renderModuleList(maxWidth - 6)
 	case stepScript:
 		body = m.renderScriptList(maxWidth - 6)
 	case stepPort:
@@ -326,104 +401,146 @@ func (m launcherModel) View() string {
 
 // renderStepIndicator shows the current step
 func (m launcherModel) renderStepIndicator() string {
-	steps := []string{"Worktree", "Project", "Script", "Port", "Confirm"}
+	type stepInfo struct {
+		step  launcherStep
+		label string
+	}
+	allSteps := []stepInfo{
+		{stepRepo, "Repo"},
+		{stepDirectory, "Directory"},
+		{stepModule, "Module"},
+		{stepScript, "Script"},
+		{stepPort, "Port"},
+		{stepConfirm, "Confirm"},
+	}
+
+	// Skip "Directory" in indicator when auto-skipped
+	var steps []stepInfo
+	for _, s := range allSteps {
+		if s.step == stepDirectory && len(m.directories) <= 1 {
+			continue
+		}
+		steps = append(steps, s)
+	}
+
 	var parts []string
-	for i, s := range steps {
-		if launcherStep(i) == m.step {
-			parts = append(parts, helpKeyStyle.Render("["+s+"]"))
-		} else if launcherStep(i) < m.step {
-			parts = append(parts, statusRunning.Render(s))
+	for _, s := range steps {
+		if s.step == m.step {
+			parts = append(parts, helpKeyStyle.Render("["+s.label+"]"))
+		} else if s.step < m.step {
+			parts = append(parts, statusRunning.Render(s.label))
 		} else {
-			parts = append(parts, dimStyle.Render(s))
+			parts = append(parts, dimStyle.Render(s.label))
 		}
 	}
 	return strings.Join(parts, " > ")
 }
 
-// renderWorktreeList shows available worktrees in two sections
-func (m launcherModel) renderWorktreeList(width int) string {
-	if len(m.worktrees) == 0 {
-		return dimStyle.Render("No worktrees found. Press 's' to add scan directories.")
-	}
-
-	// Find where worktrees section starts
-	wtStart := -1
-	hasRepos := false
-	for i, wt := range m.worktrees {
-		if !wt.IsWorktree {
-			hasRepos = true
-		}
-		if wt.IsWorktree && wtStart == -1 {
-			wtStart = i
-		}
+// renderRepoList shows main repositories (not worktrees)
+func (m launcherModel) renderRepoList(width int) string {
+	if len(m.mainRepos) == 0 {
+		return dimStyle.Render("No projects found. Press 's' to add scan directories.")
 	}
 
 	var lines []string
-
-	if hasRepos {
-		lines = append(lines, sectionStyle.Render("── Projects ──"))
-	}
-
-	for i, wt := range m.worktrees {
-		if i == wtStart {
-			if hasRepos {
-				lines = append(lines, "")
-			}
-			lines = append(lines, sectionStyle.Render("── Worktrees ──"))
+	for i, repo := range m.mainRepos {
+		prefix := "  "
+		style := normalItemStyle
+		if i == m.repoIndex {
+			prefix = "> "
+			style = selectedItemStyle
 		}
-		lines = append(lines, m.renderWorktreeItem(i, wt, width))
+
+		var age string
+		if !repo.LastModified.IsZero() {
+			age = "  " + ageStyle.Render(formatAge(repo.LastModified))
+		}
+
+		// Count worktrees for this project
+		wtCount := 0
+		for _, wt := range m.allWorktrees {
+			if wt.IsWorktree && wt.MainProject == repo.Name {
+				wtCount++
+			}
+		}
+		var wtBadge string
+		if wtCount > 0 {
+			wtBadge = "  " + dimStyle.Render(fmt.Sprintf("(%d wt)", wtCount))
+		}
+
+		line := fmt.Sprintf("%s%s  %s%s%s",
+			prefix,
+			style.Render(repo.Name),
+			portStyle.Render(repo.Branch),
+			age,
+			wtBadge,
+		)
+
+		if lipgloss.Width(line) > width {
+			line = lipgloss.NewStyle().MaxWidth(width).Render(line)
+		}
+		lines = append(lines, line)
 	}
 
 	maxVis := m.maxVisibleItems(0)
-	return scrollWindow(lines, m.wtIndex, maxVis)
+	return scrollWindow(lines, m.repoIndex, maxVis)
 }
 
-// renderWorktreeItem renders a single item in the worktree list
-func (m launcherModel) renderWorktreeItem(idx int, wt discovery.Worktree, width int) string {
-	prefix := "  "
-	style := normalItemStyle
-	if idx == m.wtIndex {
-		prefix = "> "
-		style = selectedItemStyle
+// renderDirectoryList shows working directories for the selected project
+func (m launcherModel) renderDirectoryList(width int) string {
+	repoName := m.mainRepos[m.repoIndex].Name
+	header := dimStyle.Render("Project: ") + selectedItemStyle.Render(repoName)
+
+	var lines []string
+	for i, dir := range m.directories {
+		prefix := "  "
+		style := normalItemStyle
+		if i == m.dirIndex {
+			prefix = "> "
+			style = selectedItemStyle
+		}
+
+		name := dir.Name
+		if !dir.IsWorktree {
+			name = ". (main)"
+		}
+
+		var age string
+		if !dir.LastModified.IsZero() {
+			age = "  " + ageStyle.Render(formatAge(dir.LastModified))
+		}
+
+		line := fmt.Sprintf("%s%s  %s%s",
+			prefix,
+			style.Render(name),
+			portStyle.Render(dir.Branch),
+			age,
+		)
+		if lipgloss.Width(line) > width {
+			line = lipgloss.NewStyle().MaxWidth(width).Render(line)
+		}
+		lines = append(lines, line)
 	}
 
-	// Age
-	var age string
-	if !wt.LastModified.IsZero() {
-		age = "  " + ageStyle.Render(formatAge(wt.LastModified))
-	}
-
-	// Parent project indicator for worktrees
-	var parent string
-	if wt.IsWorktree && wt.MainProject != "" {
-		parent = "  " + dimStyle.Render("-> "+wt.MainProject)
-	}
-
-	line := fmt.Sprintf("%s%s  %s%s%s",
-		prefix,
-		style.Render(wt.Name),
-		portStyle.Render(wt.Branch),
-		age,
-		parent,
+	maxVis := m.maxVisibleItems(2)
+	return lipgloss.JoinVertical(lipgloss.Left,
+		header,
+		"",
+		lipgloss.NewStyle().Width(width).Render(scrollWindow(lines, m.dirIndex, maxVis)),
 	)
-
-	if lipgloss.Width(line) > width {
-		line = lipgloss.NewStyle().MaxWidth(width).Render(line)
-	}
-
-	return line
 }
 
-// renderProjectList shows available projects for the selected worktree
-func (m launcherModel) renderProjectList(width int) string {
-	wtName := m.worktrees[m.wtIndex].Name
-	header := dimStyle.Render("Worktree: ") + selectedItemStyle.Render(wtName)
+// renderModuleList shows available modules for the selected directory
+func (m launcherModel) renderModuleList(width int) string {
+	dir := m.selectedWorktree()
+	header := dimStyle.Render("Directory: ") + selectedItemStyle.Render(dir.Name) +
+		"  " + portStyle.Render(dir.Branch)
 
 	if len(m.projects) == 0 {
 		return lipgloss.JoinVertical(lipgloss.Left,
 			header,
 			"",
-			dimStyle.Render("No projects found in this worktree"),
+			dimStyle.Render("No projects found in this directory"),
 		)
 	}
 
@@ -449,7 +566,7 @@ func (m launcherModel) renderProjectList(width int) string {
 		lines = append(lines, line)
 	}
 
-	maxVis := m.maxVisibleItems(2) // header is 1 line + 1 empty
+	maxVis := m.maxVisibleItems(2)
 	return lipgloss.JoinVertical(lipgloss.Left,
 		header,
 		"",
@@ -459,13 +576,13 @@ func (m launcherModel) renderProjectList(width int) string {
 
 // renderScriptList shows available scripts for the selected project
 func (m launcherModel) renderScriptList(width int) string {
-	wtName := m.worktrees[m.wtIndex].Name
+	dir := m.selectedWorktree()
 	projName := m.projects[m.projIndex].Name
 	pm := m.projects[m.projIndex].PackageManager
 
 	header := lipgloss.JoinVertical(lipgloss.Left,
-		dimStyle.Render("Worktree: ")+selectedItemStyle.Render(wtName),
-		dimStyle.Render("Project:  ")+selectedItemStyle.Render(projName)+" "+dimStyle.Render("["+pm+"]"),
+		dimStyle.Render("Directory: ")+selectedItemStyle.Render(dir.Name),
+		dimStyle.Render("Project:   ")+selectedItemStyle.Render(projName)+" "+dimStyle.Render("["+pm+"]"),
 	)
 
 	if len(m.scripts) == 0 {
@@ -498,12 +615,12 @@ func (m launcherModel) renderScriptList(width int) string {
 
 // renderPortInput shows the port number input
 func (m launcherModel) renderPortInput(width int) string {
-	wtName := m.worktrees[m.wtIndex].Name
+	dir := m.selectedWorktree()
 	projName := m.projects[m.projIndex].Name
 
 	header := lipgloss.JoinVertical(lipgloss.Left,
-		dimStyle.Render("Worktree: ")+selectedItemStyle.Render(wtName),
-		dimStyle.Render("Project:  ")+selectedItemStyle.Render(projName),
+		dimStyle.Render("Directory: ")+selectedItemStyle.Render(dir.Name),
+		dimStyle.Render("Project:   ")+selectedItemStyle.Render(projName),
 	)
 
 	var portLine string
@@ -526,7 +643,7 @@ func (m launcherModel) renderPortInput(width int) string {
 
 // renderConfirm shows the final confirmation
 func (m launcherModel) renderConfirm(width int) string {
-	wt := m.worktrees[m.wtIndex]
+	wt := m.selectedWorktree()
 	proj := m.projects[m.projIndex]
 	port := m.portInput.Value()
 
@@ -539,8 +656,8 @@ func (m launcherModel) renderConfirm(width int) string {
 
 	var summaryLines []string
 	summaryLines = append(summaryLines,
-		dimStyle.Render("Worktree: ")+selectedItemStyle.Render(wt.Name),
-		dimStyle.Render("Project:  ")+selectedItemStyle.Render(proj.Name),
+		dimStyle.Render("Directory: ")+selectedItemStyle.Render(wt.Name),
+		dimStyle.Render("Project:   ")+selectedItemStyle.Render(proj.Name),
 	)
 	if script != "" {
 		pm := proj.PackageManager
