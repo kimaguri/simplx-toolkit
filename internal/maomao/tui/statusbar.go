@@ -112,6 +112,8 @@ func (s statusBarModel) renderHints() string {
 			hint("enter", "open"),
 			hint("n", "new"),
 			hint("d", "delete"),
+			hint("R", "review"),
+			hint("D", "done"),
 			hint("b", "sidebar"),
 			hint("tab", "panes"),
 			hint("r", "refresh"),

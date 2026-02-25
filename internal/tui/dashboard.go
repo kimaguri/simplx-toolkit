@@ -33,7 +33,7 @@ type dashboardModel struct {
 	ready         bool
 	logSubCh      chan string
 	logSubName    string
-	logBuf        *process.LogBuffer
+	logBuf        *process.SegmentedLog
 	autoScroll    bool
 	clipboardMsg    string
 	tunnelFeedback  string

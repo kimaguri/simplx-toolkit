@@ -24,7 +24,7 @@ type logViewModel struct {
 	port          int
 	rp            *process.RunningProcess // reference to process (for PTY/VTerm access)
 	viewport      viewport.Model
-	logBuf        *process.LogBuffer
+	logBuf        *process.SegmentedLog
 	subCh         chan string
 	autoScroll    bool
 	width         int

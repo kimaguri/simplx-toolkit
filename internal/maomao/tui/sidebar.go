@@ -142,6 +142,13 @@ func (s sidebarModel) View() string {
 			} else if t.Active {
 				mark = lipgloss.NewStyle().Foreground(catBlue).Render("●")
 			}
+			// Override mark based on task status (review/done)
+			switch t.Status {
+			case "review":
+				mark = lipgloss.NewStyle().Foreground(lipgloss.Color("#bb9af7")).Render("◈")
+			case "done":
+				mark = lipgloss.NewStyle().Foreground(lipgloss.Color("#9ece6a")).Render("✓")
+			}
 
 			// Truncate title to fit
 			maxTitleW := s.width - 21
@@ -185,7 +192,21 @@ func (s sidebarModel) View() string {
 			}
 
 			lines = append(lines, detail("type:", selected.Type))
-			lines = append(lines, detail("status:", selected.Status))
+
+			// Color-coded status display
+			statusVal := selected.Status
+			var statusRendered string
+			switch selected.Status {
+			case "review":
+				statusRendered = lipgloss.NewStyle().Foreground(lipgloss.Color("#bb9af7")).Render(statusVal)
+			case "done":
+				statusRendered = lipgloss.NewStyle().Foreground(lipgloss.Color("#9ece6a")).Render(statusVal)
+			case "active":
+				statusRendered = lipgloss.NewStyle().Foreground(catBlue).Render(statusVal)
+			default:
+				statusRendered = dimSt.Render(statusVal)
+			}
+			lines = append(lines, fmt.Sprintf("   %s %s", graySt.Render("status:"), statusRendered))
 
 			repoWord := "repos"
 			if selected.Repos == 1 {
