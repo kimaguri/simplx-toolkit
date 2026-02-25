@@ -4,6 +4,17 @@ import tea "github.com/charmbracelet/bubbletea"
 
 // handleMouseClick processes a left-click at (x, y) to switch focus.
 func (w *Workspace) handleMouseClick(x, y int) (*Workspace, tea.Cmd) {
+	// Exit interactive mode on any mouse click (focus is changing)
+	if w.mode == modeInteractive {
+		w.mode = modeNavigate
+		if w.paneIdx < len(w.panes) {
+			w.panes[w.paneIdx].interactive = false
+		}
+		if w.stdinProxy != nil {
+			w.stdinProxy.SetInteractive(false)
+		}
+	}
+
 	sidebarW := w.width / 4
 	if sidebarW < 20 {
 		sidebarW = 20
