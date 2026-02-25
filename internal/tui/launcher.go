@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -341,6 +342,19 @@ func (m *launcherModel) moveSelection(delta int) {
 	}
 }
 
+// worktreeLocationHint returns a dim-styled hint showing whether a worktree
+// lives inside the project (.worktrees/) or next to it (sidecar).
+func worktreeLocationHint(wtPath, mainPath string) string {
+	rel, err := filepath.Rel(mainPath, wtPath)
+	if err != nil {
+		return ""
+	}
+	if strings.HasPrefix(rel, ".worktrees"+string(filepath.Separator)) || strings.HasPrefix(rel, ".worktrees") {
+		return "  " + dimStyle.Render(".worktrees/")
+	}
+	return "  " + dimStyle.Render("../")
+}
+
 // clampIndex keeps idx within [0, length-1]
 func clampIndex(idx, length int) int {
 	if idx < 0 {
@@ -501,8 +515,13 @@ func (m launcherModel) renderDirectoryList(width int) string {
 		}
 
 		name := dir.Name
+		var location string
 		if !dir.IsWorktree {
 			name = ". (main)"
+		} else {
+			// Show relative location hint
+			mainPath := m.mainRepos[m.repoIndex].Path
+			location = worktreeLocationHint(dir.Path, mainPath)
 		}
 
 		var age string
@@ -510,10 +529,11 @@ func (m launcherModel) renderDirectoryList(width int) string {
 			age = "  " + ageStyle.Render(formatAge(dir.LastModified))
 		}
 
-		line := fmt.Sprintf("%s%s  %s%s",
+		line := fmt.Sprintf("%s%s  %s%s%s",
 			prefix,
 			style.Render(name),
 			portStyle.Render(dir.Branch),
+			location,
 			age,
 		)
 		if lipgloss.Width(line) > width {

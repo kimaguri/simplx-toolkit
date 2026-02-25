@@ -434,3 +434,23 @@ func TestLauncher_UpDownKeys_Navigate(t *testing.T) {
 		t.Errorf("expected repoIndex=0 after up arrow, got %d", updated.repoIndex)
 	}
 }
+
+func TestWorktreeLocationHint_Internal(t *testing.T) {
+	mainPath := "/home/user/projects/myrepo"
+	wtPath := "/home/user/projects/myrepo/.worktrees/feature-branch"
+
+	hint := worktreeLocationHint(wtPath, mainPath)
+	if !strings.Contains(hint, ".worktrees/") {
+		t.Errorf("expected '.worktrees/' hint for internal worktree, got: %q", hint)
+	}
+}
+
+func TestWorktreeLocationHint_Sidecar(t *testing.T) {
+	mainPath := "/home/user/projects/myrepo"
+	wtPath := "/home/user/projects/myrepo-feature-branch"
+
+	hint := worktreeLocationHint(wtPath, mainPath)
+	if !strings.Contains(hint, "../") {
+		t.Errorf("expected '../' hint for sidecar worktree, got: %q", hint)
+	}
+}
