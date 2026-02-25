@@ -28,17 +28,6 @@ const (
 // spinner frames (braille dots — smooth rotation)
 var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 
-// paneColorPalette — distinct border colors for each pane
-var paneColorPalette = []lipgloss.Color{
-	"#7aa2f7", // blue
-	"#9ece6a", // green
-	"#bb9af7", // purple
-	"#f7768e", // pink
-	"#ff9e64", // orange
-	"#7dcfff", // cyan
-	"#e0af68", // yellow
-}
-
 // termPaneModel represents a single repo's terminal pane.
 type termPaneModel struct {
 	name        string                      // repo name (display)
@@ -82,7 +71,12 @@ func (p termPaneModel) Update(msg tea.Msg) (termPaneModel, tea.Cmd) {
 		if p.interactive && p.ptyWriter != nil {
 			raw := keyMsgToBytes(msg)
 			if raw != nil {
-				p.ptyWriter.Write(raw)
+				if _, err := p.ptyWriter.Write(raw); err != nil {
+					// Process exited — mark pane as stopped so workspace exits interactive mode
+					p.status = paneStopped
+					p.interactive = false
+					p.ptyWriter = nil
+				}
 			}
 		}
 	}
@@ -120,7 +114,12 @@ func (p termPaneModel) View() string {
 	if p.focused || p.interactive {
 		switch p.status {
 		case paneRunning:
-			statusStr = lipgloss.NewStyle().Foreground(lipgloss.Color("#9ece6a")).Render(" ● running ")
+			if p.interactive {
+				statusStr = lipgloss.NewStyle().Foreground(lipgloss.Color("#e0af68")).Render(" ● interactive ")
+			} else {
+				// Focused but not interactive = watching mode
+				statusStr = lipgloss.NewStyle().Foreground(lipgloss.Color("#7aa2f7")).Render(" ◉ watching ")
+			}
 		case paneStopped:
 			statusStr = lipgloss.NewStyle().Foreground(catDimWhite).Render(" ○ stopped ")
 		case paneError:

@@ -85,6 +85,12 @@ func WriteContext(params ContextParams) error {
 		return fmt.Errorf("render AGENT.md: %w", err)
 	}
 
+	// Inject previous session summary if available
+	summaryPath := filepath.Join(params.WorktreeDir, ".maomao", "session-summary.md")
+	if summaryData, readErr := os.ReadFile(summaryPath); readErr == nil && len(summaryData) > 0 {
+		content += "\n" + string(summaryData) + "\n"
+	}
+
 	maomaoDir := filepath.Join(params.WorktreeDir, ".maomao")
 	if err := os.MkdirAll(maomaoDir, 0o755); err != nil {
 		return fmt.Errorf("create .maomao dir: %w", err)
@@ -103,6 +109,73 @@ func WriteContext(params ContextParams) error {
 	createTdSession(params.WorktreeDir)
 
 	return nil
+}
+
+// SessionSummaryParams holds the data needed to write a session summary.
+type SessionSummaryParams struct {
+	WorktreeDir     string
+	LastOutputLines []string // last N lines of agent PTY output
+	Timestamp       time.Time
+}
+
+// WriteSessionSummary captures the state of a worktree at agent stop/crash.
+// Writes to .maomao/session-summary.md for injection into next session's AGENT.md.
+func WriteSessionSummary(params SessionSummaryParams) error {
+	if params.WorktreeDir == "" {
+		return nil
+	}
+	if params.Timestamp.IsZero() {
+		params.Timestamp = time.Now()
+	}
+
+	var sections []string
+	sections = append(sections, fmt.Sprintf("## Previous Session (%s)",
+		params.Timestamp.Format("2006-01-02 15:04")))
+
+	// Git diff --stat (changed files)
+	diffStat := runGitCmd(params.WorktreeDir, "diff", "--stat")
+	if diffStat != "" {
+		sections = append(sections, "\n### Changes Made\n```\n"+diffStat+"\n```")
+	}
+
+	// Git log --oneline -5 (recent commits)
+	gitLog := runGitCmd(params.WorktreeDir, "log", "--oneline", "-5")
+	if gitLog != "" {
+		sections = append(sections, "\n### Recent Commits\n```\n"+gitLog+"\n```")
+	}
+
+	// Last agent output
+	if len(params.LastOutputLines) > 0 {
+		lines := params.LastOutputLines
+		if len(lines) > 30 {
+			lines = lines[len(lines)-30:]
+		}
+		output := strings.Join(lines, "\n")
+		sections = append(sections, "\n### Last Agent Output (truncated)\n```\n"+output+"\n```")
+	}
+
+	content := strings.Join(sections, "\n")
+
+	summaryPath := filepath.Join(params.WorktreeDir, ".maomao", "session-summary.md")
+	dir := filepath.Dir(summaryPath)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("create .maomao dir: %w", err)
+	}
+	return os.WriteFile(summaryPath, []byte(content), 0o644)
+}
+
+// runGitCmd runs a git command in the given directory and returns stdout.
+// Returns empty string on error (best-effort).
+func runGitCmd(workDir string, args ...string) string {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd.Dir = workDir
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
 }
 
 func renderAgentMD(params ContextParams) (string, error) {

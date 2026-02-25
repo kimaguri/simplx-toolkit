@@ -11,7 +11,6 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 
-	"github.com/kimaguri/simplx-toolkit/internal/discovery"
 	"github.com/kimaguri/simplx-toolkit/internal/maomao/agent"
 	maomaoconfig "github.com/kimaguri/simplx-toolkit/internal/maomao/config"
 	"github.com/kimaguri/simplx-toolkit/internal/maomao/event"
@@ -19,7 +18,6 @@ import (
 	"github.com/kimaguri/simplx-toolkit/internal/maomao/repo"
 	"github.com/kimaguri/simplx-toolkit/internal/maomao/task"
 	"github.com/kimaguri/simplx-toolkit/internal/maomao/tui"
-	"github.com/kimaguri/simplx-toolkit/internal/process"
 )
 
 var (
@@ -80,6 +78,13 @@ var logsCmd = &cobra.Command{
 	RunE:  runLogs,
 }
 
+var statsCmd = &cobra.Command{
+	Use:   "stats [task-id]",
+	Short: "Show time tracking statistics",
+	Args:  cobra.MaximumNArgs(1),
+	RunE:  runStats,
+}
+
 var defaultGlobalConfig = `default_agent = "claude"
 mode = "supervised"
 scan_dirs = []
@@ -107,6 +112,8 @@ func init() {
 	rootCmd.AddCommand(logsCmd)
 	logsCmd.Flags().StringP("task", "t", "", "Filter by task ID")
 	logsCmd.Flags().IntP("count", "n", 50, "Number of events to show")
+	rootCmd.AddCommand(statsCmd)
+	statsCmd.Flags().Bool("json", false, "Output as JSON")
 }
 
 func main() {
@@ -149,439 +156,6 @@ func runWizard(configDir string) error {
 	_, err := p.Run()
 	return err
 }
-
-// launchWorkspace creates and runs the embedded workspace TUI.
-func launchWorkspace(configDir string, initialTaskID string) error {
-	loadTasks := func() []tui.TaskEntry {
-		return buildTaskEntries()
-	}
-
-	sessionsDir := filepath.Join(configDir, "sessions")
-	logsDir := filepath.Join(configDir, "logs")
-	os.MkdirAll(sessionsDir, 0o755)
-	os.MkdirAll(logsDir, 0o755)
-	pm := process.NewProcessManager(sessionsDir, logsDir)
-
-	// Wire agent lifecycle events via OnExit callback
-	pm.OnExit = func(key string, exitCode int) {
-		parts := strings.SplitN(key, ":", 2)
-		if len(parts) != 2 {
-			return
-		}
-		taskID, repoName := parts[0], parts[1]
-		if exitCode == 0 {
-			event.Emit(event.New(event.AgentStopped, taskID, repoName, ""))
-		} else {
-			event.Emit(event.New(event.AgentCrashed, taskID, repoName, fmt.Sprintf("exit code %d", exitCode)))
-		}
-	}
-
-	// Reconnect to surviving tmux sessions from previous run
-	reconnected := pm.Reconnect()
-	if len(reconnected) > 0 {
-		maomaolog.Logger.Info().Int("count", len(reconnected)).Msg("reconnected to existing agent sessions")
-	}
-
-	// Task opener: loads task, launches agent PTYs, returns pane info per repo
-	opener := func(taskID string) ([]tui.PaneInit, error) {
-		tk, err := task.Load(taskID)
-		if err != nil {
-			return nil, fmt.Errorf("load task: %w", err)
-		}
-		tk.Status = task.StatusActive
-		task.Save(tk)
-
-		globalCfg, _ := maomaoconfig.LoadGlobalConfig(configDir)
-
-		var panes []tui.PaneInit
-		for _, r := range tk.Repos {
-			agentName := r.Agent
-			var agentConf maomaoconfig.AgentConf
-			if globalCfg != nil {
-				if ac, ok := globalCfg.Agents[agentName]; ok {
-					agentConf = ac
-				}
-			}
-			if agentConf.Command == "" {
-				agentConf = maomaoconfig.AgentConf{Name: "claude", Command: "claude"}
-			}
-
-			workDir := r.WorktreeDir
-			if workDir == "" {
-				workDir = r.Path
-			}
-
-			// Write agent context before launching
-			agent.WriteContext(agent.ContextParams{
-				RepoName:    r.Name,
-				TaskID:      tk.ID,
-				TaskType:    tk.Type,
-				TaskTitle:   tk.Title,
-				TaskStatus:  tk.Status,
-				Branch:      r.Branch,
-				AllRepos:    tk.Repos,
-				WorktreeDir: workDir,
-			})
-
-			// Determine if we should resume an existing session
-			shouldResume := r.SessionID != ""
-			agentCmd := agent.BuildCommand(agentConf, r.Branch, shouldResume)
-
-			processKey := taskID + ":" + r.Name
-			info := process.SessionInfo{
-				Name:    processKey,
-				Command: "sh",
-				Args:    []string{"-c", agentCmd},
-				WorkDir: workDir,
-			}
-
-			rp, err := pm.Start(info)
-			if err != nil {
-				maomaolog.Logger.Warn().Err(err).Str("repo", r.Name).Str("key", processKey).Msg("failed to start agent")
-				panes = append(panes, tui.PaneInit{RepoName: r.Name, ProcessKey: processKey, WorktreeDir: workDir})
-				continue
-			}
-			event.Emit(event.New(event.AgentStarted, taskID, r.Name, ""))
-
-			// Persist session ID for future resume
-			_ = task.UpdateRepoSession(taskID, r.Name, processKey)
-
-			panes = append(panes, tui.PaneInit{
-				RepoName:    r.Name,
-				ProcessKey:  processKey,
-				VTerm:       rp.Terminal(),
-				PTYWriter:   rp.InputWriter(),
-				WorktreeDir: workDir,
-				Scrollback:  rp.ScrollbackSource(),
-			})
-		}
-		return panes, nil
-	}
-
-	workspace := tui.NewWorkspace(loadTasks(), opener, loadTasks, initialTaskID)
-
-	paneCtrl := &tui.PaneController{
-		Stop: func(name string) error {
-			return pm.Stop(name)
-		},
-		Restart: func(processKey string) (*tui.PaneInit, error) {
-			rp, err := pm.Restart(processKey)
-			if err != nil {
-				return nil, err
-			}
-			// Extract repo name from processKey (taskID:repoName)
-			repoName := processKey
-			if parts := strings.SplitN(processKey, ":", 2); len(parts) == 2 {
-				repoName = parts[1]
-			}
-			return &tui.PaneInit{
-				RepoName:   repoName,
-				ProcessKey: processKey,
-				VTerm:      rp.Terminal(),
-				PTYWriter:  rp.InputWriter(),
-				Scrollback: rp.ScrollbackSource(),
-			}, nil
-		},
-		Resize: func(name string, rows, cols int) {
-			_ = pm.ResizePTY(name, uint16(rows), uint16(cols))
-		},
-	}
-	workspace.SetPaneController(paneCtrl)
-
-	workspace.SetPaneLauncher(func(info tui.PaneLaunchInfo) (*tui.PaneInit, error) {
-		si := process.SessionInfo{
-			Name:    info.ProcessKey,
-			Command: info.Command,
-			Args:    info.Args,
-			WorkDir: info.WorkDir,
-		}
-		rp, err := pm.Start(si)
-		if err != nil {
-			return nil, err
-		}
-		return &tui.PaneInit{
-			ProcessKey:  info.ProcessKey,
-			VTerm:       rp.Terminal(),
-			PTYWriter:   rp.InputWriter(),
-			WorktreeDir: info.WorkDir,
-			Scrollback:  rp.ScrollbackSource(),
-		}, nil
-	})
-
-	// Load available repos from scan_dirs
-	loadRepos := func() []tui.RepoEntry {
-		cfg, _ := maomaoconfig.LoadGlobalConfig(configDir)
-		if cfg == nil || len(cfg.ScanDirs) == 0 {
-			return nil
-		}
-		worktrees := discovery.ScanWorktrees(cfg.ScanDirs)
-		var repos []tui.RepoEntry
-		for _, wt := range worktrees {
-			repos = append(repos, tui.RepoEntry{
-				Name:        wt.Name,
-				Path:        wt.Path,
-				Branch:      wt.Branch,
-				IsWorktree:  wt.IsWorktree,
-				MainProject: wt.MainProject,
-			})
-		}
-		return repos
-	}
-
-	// Create a new task: branch + repo → worktree + persist
-	createTask := func(branch, repoName, repoPath string) (string, error) {
-		globalCfg, _ := maomaoconfig.LoadGlobalConfig(configDir)
-		agentName := "claude"
-		baseBranch := "main"
-		wtBaseDir := ".worktrees"
-		if globalCfg != nil {
-			if globalCfg.DefaultAgent != "" {
-				agentName = globalCfg.DefaultAgent
-			}
-			if globalCfg.Branch.Base != "" {
-				baseBranch = globalCfg.Branch.Base
-			}
-			if globalCfg.Branch.WorktreeDir != "" {
-				wtBaseDir = globalCfg.Branch.WorktreeDir
-			}
-		}
-
-		parts := strings.Split(branch, "/")
-		taskType := parts[0]
-		taskID := branch
-		if len(parts) >= 2 {
-			taskID = parts[1]
-		}
-		taskTitle := branch
-		if len(parts) >= 3 {
-			taskTitle = strings.Join(parts[2:], " ")
-		}
-
-		wtName := strings.ReplaceAll(branch, "/", "-")
-		wtDir := filepath.Join(repoPath, wtBaseDir, wtName)
-
-		if err := repo.CreateWorktree(repoPath, wtDir, branch, baseBranch); err != nil {
-			return "", fmt.Errorf("create worktree: %w", err)
-		}
-
-		tk := &task.Task{
-			ID:      taskID,
-			Type:    taskType,
-			Title:   taskTitle,
-			Status:  task.StatusActive,
-			Created: time.Now(),
-			Repos: []task.TaskRepo{{
-				Name:        repoName,
-				Path:        repoPath,
-				Branch:      branch,
-				WorktreeDir: wtDir,
-				Agent:       agentName,
-				Status:      task.RepoInProgress,
-			}},
-		}
-		if err := task.Save(tk); err != nil {
-			return "", err
-		}
-		return taskID, nil
-	}
-
-	// Add a repo to an existing task
-	addRepoFn := func(taskID, repoName, repoPath string) (*tui.PaneInit, error) {
-		tk, err := task.Load(taskID)
-		if err != nil {
-			return nil, err
-		}
-
-		globalCfg, _ := maomaoconfig.LoadGlobalConfig(configDir)
-		agentName := "claude"
-		baseBranch := "main"
-		wtBaseDir := ".worktrees"
-		if globalCfg != nil {
-			if globalCfg.DefaultAgent != "" {
-				agentName = globalCfg.DefaultAgent
-			}
-			if globalCfg.Branch.Base != "" {
-				baseBranch = globalCfg.Branch.Base
-			}
-			if globalCfg.Branch.WorktreeDir != "" {
-				wtBaseDir = globalCfg.Branch.WorktreeDir
-			}
-		}
-
-		// Reuse branch from existing repos
-		branchName := ""
-		if len(tk.Repos) > 0 {
-			branchName = tk.Repos[0].Branch
-		}
-		if branchName == "" {
-			return nil, fmt.Errorf("no branch found for task %s", taskID)
-		}
-
-		wtName := strings.ReplaceAll(branchName, "/", "-")
-		wtDir := filepath.Join(repoPath, wtBaseDir, wtName)
-
-		if err := repo.CreateWorktree(repoPath, wtDir, branchName, baseBranch); err != nil {
-			return nil, fmt.Errorf("create worktree: %w", err)
-		}
-
-		task.AddRepo(tk, repoName, repoPath, branchName, wtDir, agentName)
-
-		// Write agent context before launching
-		agent.WriteContext(agent.ContextParams{
-			RepoName:    repoName,
-			TaskID:      tk.ID,
-			TaskType:    tk.Type,
-			TaskTitle:   tk.Title,
-			TaskStatus:  tk.Status,
-			Branch:      branchName,
-			AllRepos:    tk.Repos,
-			WorktreeDir: wtDir,
-		})
-
-		// Start agent
-		var agentConf maomaoconfig.AgentConf
-		if globalCfg != nil {
-			if ac, ok := globalCfg.Agents[agentName]; ok {
-				agentConf = ac
-			}
-		}
-		if agentConf.Command == "" {
-			agentConf = maomaoconfig.AgentConf{Name: "claude", Command: "claude"}
-		}
-
-		agentCmd := agent.BuildCommand(agentConf, branchName, false)
-		processKey := taskID + ":" + repoName
-		info := process.SessionInfo{
-			Name:    processKey,
-			Command: "sh",
-			Args:    []string{"-c", agentCmd},
-			WorkDir: wtDir,
-		}
-
-		rp, err := pm.Start(info)
-		if err != nil {
-			return &tui.PaneInit{RepoName: repoName, ProcessKey: processKey, WorktreeDir: wtDir}, nil
-		}
-
-		return &tui.PaneInit{
-			RepoName:    repoName,
-			ProcessKey:  processKey,
-			VTerm:       rp.Terminal(),
-			PTYWriter:   rp.InputWriter(),
-			WorktreeDir: wtDir,
-			Scrollback:  rp.ScrollbackSource(),
-		}, nil
-	}
-
-	// Park a task
-	parkTaskFn := func(taskID string) error {
-		tk, err := task.Load(taskID)
-		if err != nil {
-			return err
-		}
-		tk.Status = task.StatusParked
-		event.Emit(event.New(event.TaskParked, taskID, "", ""))
-		return task.Save(tk)
-	}
-
-	// Delete a task (stop agents, remove worktrees, optionally branches, remove task files)
-	deleteTaskFn := func(taskID string, keepBranches bool) error {
-		tk, err := task.Load(taskID)
-		if err != nil {
-			return err
-		}
-		// Stop all agents for this task
-		for _, r := range tk.Repos {
-			processKey := taskID + ":" + r.Name
-			pm.Stop(processKey)
-		}
-		// Remove worktrees
-		for _, r := range tk.Repos {
-			if r.WorktreeDir != "" {
-				repo.RemoveWorktree(r.Path, r.WorktreeDir)
-			}
-		}
-		// Optionally delete branches
-		if !keepBranches {
-			for _, r := range tk.Repos {
-				if r.Branch != "" {
-					repo.DeleteBranch(r.Path, r.Branch)
-				}
-			}
-		}
-		// Delete task files
-		return task.Delete(taskID)
-	}
-
-	workspace.SetCallbacks(loadRepos, createTask, addRepoFn, parkTaskFn, deleteTaskFn)
-
-	p := tea.NewProgram(workspace, tea.WithAltScreen(), tea.WithMouseCellMotion())
-	_, err := p.Run()
-	if err != nil {
-		return fmt.Errorf("TUI: %w", err)
-	}
-
-	// Save agent logs before stopping processes (all tasks, not just active)
-	for _, rp := range pm.List() {
-		content := rp.LogBuf.Content()
-		if content == "" {
-			continue
-		}
-		// Process key is taskID:repoName
-		parts := strings.SplitN(rp.Info.Name, ":", 2)
-		if len(parts) == 2 {
-			task.SaveAgentLog(parts[0], parts[1], []byte(content))
-		}
-	}
-
-	// On exit: stop all managed processes
-	for _, rp := range pm.List() {
-		pm.Stop(rp.Info.Name)
-	}
-
-	// Park active tasks
-	parkActiveTasks()
-
-	return nil
-}
-
-// parkActiveTasks marks all active tasks as parked.
-func parkActiveTasks() {
-	tasks, _ := task.List()
-	for _, t := range tasks {
-		if t.Status == task.StatusActive {
-			t.Status = task.StatusParked
-			task.Save(t)
-		}
-	}
-}
-
-// buildTaskEntries creates TaskEntry slice from persisted tasks.
-func buildTaskEntries() []tui.TaskEntry {
-	tasks, _ := task.List()
-	var entries []tui.TaskEntry
-	for _, t := range tasks {
-		title := t.Title
-		if len(title) > 30 {
-			title = title[:27] + "..."
-		}
-		var repoNames []string
-		for _, r := range t.Repos {
-			repoNames = append(repoNames, r.Name)
-		}
-		entries = append(entries, tui.TaskEntry{
-			ID:        t.ID,
-			Type:      t.Type,
-			Title:     title,
-			Status:    t.Status,
-			Active:    t.Status == task.StatusActive,
-			Repos:     len(t.Repos),
-			RepoNames: repoNames,
-		})
-	}
-	return entries
-}
-
 
 func runAgents(cmd *cobra.Command, args []string) error {
 	configDir := maomaoconfig.GlobalConfigDir()
@@ -687,7 +261,7 @@ func createTaskDirect(configDir, branchName, repoName, repoPath string) (string,
 		taskTitle = strings.Join(parts[2:], " ")
 	}
 
-	// Worktree dir name: branch slashes → dashes
+	// Worktree dir name: branch slashes -> dashes
 	wtName := strings.ReplaceAll(branchName, "/", "-")
 	wtDir := filepath.Join(repoPath, wtBaseDir, wtName)
 
@@ -780,5 +354,103 @@ func createGlobalConfig(configDir string) error {
 	if err := os.WriteFile(globalPath, []byte(defaultGlobalConfig), 0o644); err != nil {
 		return fmt.Errorf("create global config: %w", err)
 	}
+	return nil
+}
+
+func runStats(cmd *cobra.Command, args []string) error {
+	jsonOut, _ := cmd.Flags().GetBool("json")
+
+	if len(args) == 1 {
+		return printTaskStats(args[0], jsonOut)
+	}
+	return printAllStats(jsonOut)
+}
+
+func printTaskStats(taskID string, jsonOut bool) error {
+	stats, err := task.GetStats(taskID)
+	if err != nil {
+		return fmt.Errorf("get stats for %s: %w", taskID, err)
+	}
+
+	if jsonOut {
+		fmt.Printf(`{"task_id":%q,"total_active_sec":%d,"total_idle_sec":%d,"today_active_sec":%d,"session_count":%d,"first_session":%q,"last_session":%q}`,
+			taskID,
+			stats.TotalActiveSec,
+			stats.TotalIdleSec,
+			stats.TodayActiveSec,
+			stats.SessionCount,
+			stats.FirstSession.Format("2006-01-02 15:04"),
+			stats.LastSession.Format("2006-01-02 15:04"),
+		)
+		fmt.Println()
+		return nil
+	}
+
+	fmt.Printf("Task: %s\n", taskID)
+	fmt.Printf("  Active time:  %s\n", task.FormatDuration(stats.TotalActiveSec))
+	fmt.Printf("  Today:        %s\n", task.FormatDuration(stats.TodayActiveSec))
+	fmt.Printf("  Idle time:    %s\n", task.FormatDuration(stats.TotalIdleSec))
+	fmt.Printf("  Sessions:     %d\n", stats.SessionCount)
+	if !stats.FirstSession.IsZero() {
+		fmt.Printf("  First:        %s\n", stats.FirstSession.Format("2006-01-02 15:04"))
+		fmt.Printf("  Last:         %s\n", stats.LastSession.Format("2006-01-02 15:04"))
+	}
+	return nil
+}
+
+func printAllStats(jsonOut bool) error {
+	tasks, err := task.List()
+	if err != nil {
+		return fmt.Errorf("list tasks: %w", err)
+	}
+	if len(tasks) == 0 {
+		fmt.Println("No tasks.")
+		return nil
+	}
+
+	if jsonOut {
+		fmt.Print("[")
+		for i, t := range tasks {
+			stats, _ := task.GetStats(t.ID)
+			if stats == nil {
+				continue
+			}
+			if i > 0 {
+				fmt.Print(",")
+			}
+			fmt.Printf(`{"task_id":%q,"status":%q,"total_active_sec":%d,"today_active_sec":%d,"session_count":%d}`,
+				t.ID, t.Status, stats.TotalActiveSec, stats.TodayActiveSec, stats.SessionCount)
+		}
+		fmt.Println("]")
+		return nil
+	}
+
+	fmt.Printf("%-15s %-8s %-12s %-12s %-8s\n", "TASK", "STATUS", "ACTIVE", "TODAY", "SESSIONS")
+	fmt.Printf("%-15s %-8s %-12s %-12s %-8s\n", "----", "------", "------", "-----", "--------")
+
+	totalActive := 0
+	totalToday := 0
+	for _, t := range tasks {
+		stats, _ := task.GetStats(t.ID)
+		if stats == nil {
+			stats = &task.TimeStats{}
+		}
+		totalActive += stats.TotalActiveSec
+		totalToday += stats.TodayActiveSec
+
+		id := t.ID
+		if len(id) > 15 {
+			id = id[:12] + "..."
+		}
+		fmt.Printf("%-15s %-8s %-12s %-12s %-8d\n",
+			id,
+			t.Status,
+			task.FormatDuration(stats.TotalActiveSec),
+			task.FormatDuration(stats.TodayActiveSec),
+			stats.SessionCount,
+		)
+	}
+
+	fmt.Printf("\n%-15s %-8s %-12s %-12s\n", "TOTAL", "", task.FormatDuration(totalActive), task.FormatDuration(totalToday))
 	return nil
 }

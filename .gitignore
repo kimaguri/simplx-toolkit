@@ -2,7 +2,13 @@
 /devdash
 /local
 /mxd
+/maomao
+/maomao-test
+/bin/
 
 # IDE / tools
 .claude/
 dist/
+
+# Agent workspace
+.maomao/

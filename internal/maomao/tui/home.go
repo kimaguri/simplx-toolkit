@@ -1,20 +1,5 @@
 package tui
 
-import "github.com/charmbracelet/lipgloss"
-
-// maomao color palette (shared across all TUI views)
-var (
-	catGreen    = lipgloss.Color("#00FF00")
-	catRed      = lipgloss.Color("#FF4444")
-	catYellow   = lipgloss.Color("#FFAA00")
-	catBlue     = lipgloss.Color("#5599FF")
-	catGray     = lipgloss.Color("#666666")
-	catWhite    = lipgloss.Color("#FFFFFF")
-	catDimWhite = lipgloss.Color("#AAAAAA")
-	catBg       = lipgloss.Color("#1A1A2E")
-	catModalBg  = lipgloss.Color("#16213E")
-)
-
 // RepoEntry represents a discovered git repo.
 type RepoEntry struct {
 	Name        string
@@ -26,11 +11,14 @@ type RepoEntry struct {
 
 // TaskEntry represents a persisted task.
 type TaskEntry struct {
-	ID        string
-	Type      string
-	Title     string
-	Status    string
-	Active    bool
-	Repos     int
-	RepoNames []string // repo names for display
+	ID           string
+	Type         string
+	Title        string
+	Status       string
+	Active       bool
+	Repos        int
+	RepoNames    []string // repo names for display
+	ActiveTime   string   // formatted active time (e.g. "2h 47m")
+	TodayTime    string   // formatted today time (e.g. "1h 12m")
+	SessionCount int      // number of sessions
 }
