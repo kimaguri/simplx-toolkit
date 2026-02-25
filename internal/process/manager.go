@@ -91,6 +91,7 @@ type ProcessManager struct {
 	sessionsDir string
 	logsDir     string
 	pnpmPath    string
+	OnExit      func(key string, exitCode int) // called from goroutine when a process exits
 }
 
 // NewProcessManager creates a new manager.
@@ -234,11 +235,19 @@ func (pm *ProcessManager) waitForExit(name string, cmd *exec.Cmd, logFile *os.Fi
 	logFile.Close()
 	close(done)
 
+	exitCode := 0
+	if err != nil {
+		exitCode = 1
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			exitCode = exitErr.ExitCode()
+		}
+	}
+
 	pm.mu.Lock()
-	defer pm.mu.Unlock()
 
 	rp, exists := pm.processes[name]
 	if !exists {
+		pm.mu.Unlock()
 		return
 	}
 
@@ -261,6 +270,11 @@ func (pm *ProcessManager) waitForExit(name string, cmd *exec.Cmd, logFile *os.Fi
 		rp.LogBuf.Write([]byte("\n[process exited normally]\n"))
 	}
 	rp.LogBuf.Flush()
+	pm.mu.Unlock()
+
+	if pm.OnExit != nil {
+		pm.OnExit(name, exitCode)
+	}
 }
 
 // waitForTmuxExit waits for the tmux-backed process to exit and updates its status.
@@ -268,11 +282,13 @@ func (pm *ProcessManager) waitForTmuxExit(name string, ts *TmuxSession, done cha
 	<-ts.Done()
 	close(done)
 
+	exitCode := ts.ExitCode()
+
 	pm.mu.Lock()
-	defer pm.mu.Unlock()
 
 	rp, exists := pm.processes[name]
 	if !exists {
+		pm.mu.Unlock()
 		return
 	}
 
@@ -282,7 +298,6 @@ func (pm *ProcessManager) waitForTmuxExit(name string, ts *TmuxSession, done cha
 		rp.Tunnel = nil
 	}
 
-	exitCode := ts.ExitCode()
 	if exitCode != 0 {
 		rp.Status = StatusError
 		rp.LogBuf.Write([]byte(fmt.Sprintf("\n[process exited with code %d]\n", exitCode)))
@@ -291,6 +306,11 @@ func (pm *ProcessManager) waitForTmuxExit(name string, ts *TmuxSession, done cha
 		rp.LogBuf.Write([]byte("\n[process exited normally]\n"))
 	}
 	rp.LogBuf.Flush()
+	pm.mu.Unlock()
+
+	if pm.OnExit != nil {
+		pm.OnExit(name, exitCode)
+	}
 }
 
 // Stop sends SIGTERM then SIGKILL after timeout, removes session state

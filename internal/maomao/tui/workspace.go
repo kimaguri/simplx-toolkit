@@ -13,6 +13,7 @@ import (
 
 	"github.com/kimaguri/simplx-toolkit/internal/maomao/agent"
 	"github.com/kimaguri/simplx-toolkit/internal/maomao/event"
+	"github.com/kimaguri/simplx-toolkit/internal/maomao/task"
 )
 
 // taskOpenMsg signals that a task should be opened (agents launched).
@@ -462,6 +463,24 @@ func (w *Workspace) updateSidebarKeys(msg tea.KeyMsg) (*Workspace, tea.Cmd) {
 		}
 	case "r":
 		w.refreshSidebar()
+	case "R":
+		// Mark selected task as review
+		if sel := w.sidebar.SelectedTask(); sel != nil && sel.ID != "" {
+			if t, err := task.Load(sel.ID); err == nil {
+				t.Status = task.StatusReview
+				_ = task.Save(t)
+				w.refreshSidebar()
+			}
+		}
+	case "D":
+		// Mark selected task as done
+		if sel := w.sidebar.SelectedTask(); sel != nil && sel.ID != "" {
+			if t, err := task.Load(sel.ID); err == nil {
+				t.Status = task.StatusDone
+				_ = task.Save(t)
+				w.refreshSidebar()
+			}
+		}
 	}
 	return w, nil
 }

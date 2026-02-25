@@ -31,9 +31,14 @@ func Available(cfg *config.GlobalConfig) []config.AgentConf {
 
 // BuildCommand constructs the full command string to launch an agent with a task prompt.
 // The working directory is set via cmd.Dir at the process level, not via CLI flags.
-func BuildCommand(conf config.AgentConf, prompt string) string {
+// When resume is true and conf.ResumeFlag is non-empty, the resume flag is appended
+// before the prompt argument so the agent continues an existing session.
+func BuildCommand(conf config.AgentConf, prompt string, resume bool) string {
 	parts := []string{conf.Command}
 	parts = append(parts, conf.Args...)
+	if resume && conf.ResumeFlag != "" {
+		parts = append(parts, conf.ResumeFlag)
+	}
 	parts = append(parts, fmt.Sprintf("%q", prompt))
 	return strings.Join(parts, " ")
 }

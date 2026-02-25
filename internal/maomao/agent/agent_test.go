@@ -56,7 +56,7 @@ func TestBuildCommand(t *testing.T) {
 		Command: "claude",
 		Args:    []string{"--dangerously-skip-permissions"},
 	}
-	got := BuildCommand(conf, "fix helpd-58: test task")
+	got := BuildCommand(conf, "fix helpd-58: test task", false)
 	want := `claude --dangerously-skip-permissions "fix helpd-58: test task"`
 	if got != want {
 		t.Errorf("BuildCommand = %q, want %q", got, want)
@@ -67,9 +67,35 @@ func TestBuildCommandNoArgs(t *testing.T) {
 	conf := config.AgentConf{
 		Command: "claude",
 	}
-	got := BuildCommand(conf, "fix/HELPD-58/auth")
+	got := BuildCommand(conf, "fix/HELPD-58/auth", false)
 	want := `claude "fix/HELPD-58/auth"`
 	if got != want {
 		t.Errorf("BuildCommand = %q, want %q", got, want)
+	}
+}
+
+func TestBuildCommandResume(t *testing.T) {
+	conf := config.AgentConf{
+		Command:    "claude",
+		Args:       []string{"--dangerously-skip-permissions"},
+		ResumeFlag: "--resume",
+	}
+	got := BuildCommand(conf, "fix helpd-58: test task", true)
+	want := `claude --dangerously-skip-permissions --resume "fix helpd-58: test task"`
+	if got != want {
+		t.Errorf("BuildCommand with resume = %q, want %q", got, want)
+	}
+}
+
+func TestBuildCommandResumeNoFlag(t *testing.T) {
+	conf := config.AgentConf{
+		Command: "claude",
+		Args:    []string{"--dangerously-skip-permissions"},
+	}
+	// resume=true but ResumeFlag is empty — should not add anything
+	got := BuildCommand(conf, "fix helpd-58: test task", true)
+	want := `claude --dangerously-skip-permissions "fix helpd-58: test task"`
+	if got != want {
+		t.Errorf("BuildCommand resume with empty flag = %q, want %q", got, want)
 	}
 }

@@ -162,6 +162,26 @@ func launchWorkspace(configDir string, initialTaskID string) error {
 	os.MkdirAll(logsDir, 0o755)
 	pm := process.NewProcessManager(sessionsDir, logsDir)
 
+	// Wire agent lifecycle events via OnExit callback
+	pm.OnExit = func(key string, exitCode int) {
+		parts := strings.SplitN(key, ":", 2)
+		if len(parts) != 2 {
+			return
+		}
+		taskID, repoName := parts[0], parts[1]
+		if exitCode == 0 {
+			event.Emit(event.New(event.AgentStopped, taskID, repoName, ""))
+		} else {
+			event.Emit(event.New(event.AgentCrashed, taskID, repoName, fmt.Sprintf("exit code %d", exitCode)))
+		}
+	}
+
+	// Reconnect to surviving tmux sessions from previous run
+	reconnected := pm.Reconnect()
+	if len(reconnected) > 0 {
+		maomaolog.Logger.Info().Int("count", len(reconnected)).Msg("reconnected to existing agent sessions")
+	}
+
 	// Task opener: loads task, launches agent PTYs, returns pane info per repo
 	opener := func(taskID string) ([]tui.PaneInit, error) {
 		tk, err := task.Load(taskID)
@@ -203,7 +223,9 @@ func launchWorkspace(configDir string, initialTaskID string) error {
 				WorktreeDir: workDir,
 			})
 
-			agentCmd := agent.BuildCommand(agentConf, r.Branch)
+			// Determine if we should resume an existing session
+			shouldResume := r.SessionID != ""
+			agentCmd := agent.BuildCommand(agentConf, r.Branch, shouldResume)
 
 			processKey := taskID + ":" + r.Name
 			info := process.SessionInfo{
@@ -220,6 +242,9 @@ func launchWorkspace(configDir string, initialTaskID string) error {
 				continue
 			}
 			event.Emit(event.New(event.AgentStarted, taskID, r.Name, ""))
+
+			// Persist session ID for future resume
+			_ = task.UpdateRepoSession(taskID, r.Name, processKey)
 
 			panes = append(panes, tui.PaneInit{
 				RepoName:    r.Name,
@@ -424,7 +449,7 @@ func launchWorkspace(configDir string, initialTaskID string) error {
 			agentConf = maomaoconfig.AgentConf{Name: "claude", Command: "claude"}
 		}
 
-		agentCmd := agent.BuildCommand(agentConf, branchName)
+		agentCmd := agent.BuildCommand(agentConf, branchName, false)
 		processKey := taskID + ":" + repoName
 		info := process.SessionInfo{
 			Name:    processKey,
