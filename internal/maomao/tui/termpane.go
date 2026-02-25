@@ -57,6 +57,14 @@ type termPaneModel struct {
 	colorIdx          int               // index into paneColorPalette
 	tick        int                         // animation tick counter (incremented by workspace refresh)
 	loading     bool                        // true until meaningful visible content arrives
+
+	// Performance: dirty checking — skip string processing when content unchanged
+	lastRawContent string
+
+	// Performance: scrollback render cache — avoid subprocess on every View() call
+	cachedScrollOff    int
+	cachedScrollHeight int
+	cachedScrollResult string
 }
 
 func newTermPane(name string, height, width int) termPaneModel {
@@ -225,7 +233,13 @@ func (p *termPaneModel) SetSize(height, width int) {
 }
 
 // renderScrollback renders historical lines from the scrollback buffer.
+// Results are cached to avoid spawning tmux subprocess on every View() call.
 func (p *termPaneModel) renderScrollback(visibleLines int) string {
+	// Return cached result if scrollOff and visible height haven't changed
+	if p.scrollOff == p.cachedScrollOff && visibleLines == p.cachedScrollHeight && p.cachedScrollResult != "" {
+		return p.cachedScrollResult
+	}
+
 	total := p.scrollback.Len()
 	end := total - p.scrollOff
 	if end < 0 {
@@ -247,7 +261,12 @@ func (p *termPaneModel) renderScrollback(visibleLines int) string {
 			lines[i] = ansi.Truncate(line, innerW, "")
 		}
 	}
-	return strings.Join(lines, "\n")
+
+	result := strings.Join(lines, "\n")
+	p.cachedScrollOff = p.scrollOff
+	p.cachedScrollHeight = visibleLines
+	p.cachedScrollResult = result
+	return result
 }
 
 

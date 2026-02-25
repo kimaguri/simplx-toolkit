@@ -107,6 +107,9 @@ type Workspace struct {
 	width          int
 	height        int
 	lastEsc       time.Time // for double-Esc detection
+
+	// Performance: prevent concurrent async operations from stacking up
+	gitFetchPending bool
 }
 
 // NewWorkspace creates the root workspace model.
@@ -170,28 +173,59 @@ func (w *Workspace) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			w.panes[i].tick++
 			if w.panes[i].vterm != nil {
 				raw := w.panes[i].vterm.Render()
-				// VTerm uses \r\n line separators — strip \r to avoid display corruption
-				raw = strings.ReplaceAll(raw, "\r\n", "\n")
-				raw = strings.ReplaceAll(raw, "\r", "")
-				w.panes[i].content = raw
-				// Scrollback is fed by sanitized PTY output in readPTY — no TUI-side diff needed
-				if w.panes[i].loading {
-					plain := ansi.Strip(raw)
-					if strings.TrimSpace(plain) != "" {
-						w.panes[i].loading = false
+				// Dirty check: skip string processing if content unchanged
+				if raw != w.panes[i].lastRawContent {
+					w.panes[i].lastRawContent = raw
+					// VTerm uses \r\n line separators — strip \r to avoid display corruption
+					raw = strings.ReplaceAll(raw, "\r\n", "\n")
+					raw = strings.ReplaceAll(raw, "\r", "")
+					w.panes[i].content = raw
+					// Invalidate scrollback cache on content change
+					w.panes[i].cachedScrollResult = ""
+					// Scrollback is fed by sanitized PTY output in readPTY — no TUI-side diff needed
+					if w.panes[i].loading {
+						plain := ansi.Strip(raw)
+						if strings.TrimSpace(plain) != "" {
+							w.panes[i].loading = false
+						}
 					}
 				}
 			}
 		}
-		// Sync sidebar task status indicators in realtime
-		w.updateTaskStatuses()
-		// Refresh git statuses every ~3s (60 ticks * 50ms)
-		if len(w.panes) > 0 && w.panes[0].tick%60 == 0 {
-			w.updateGitStatuses()
+		// Sync sidebar task status indicators every 500ms (10 ticks)
+		if len(w.panes) > 0 && w.panes[0].tick%10 == 0 {
+			w.updateTaskStatuses()
+		}
+		// Async git status fetch every ~3s (60 ticks * 50ms)
+		var cmds []tea.Cmd
+		if len(w.panes) > 0 && w.panes[0].tick%60 == 0 && !w.gitFetchPending {
+			dirs := make(map[string]string, len(w.panes))
+			for _, p := range w.panes {
+				if p.worktreeDir != "" {
+					dirs[p.name] = p.worktreeDir
+				}
+			}
+			if len(dirs) > 0 {
+				w.gitFetchPending = true
+				cmds = append(cmds, fetchGitStatusesCmd(dirs))
+			}
 		}
 		if w.hasRunningPanes() {
-			return w, schedulePaneRefresh()
+			cmds = append(cmds, schedulePaneRefresh())
 		}
+		if len(cmds) == 0 {
+			return w, nil
+		}
+		return w, tea.Batch(cmds...)
+
+	case gitStatusResultMsg:
+		w.gitFetchPending = false
+		w.sidebar.SetRepoStatuses(msg.statuses)
+		return w, nil
+
+	case tdStatusResultMsg:
+		w.tdContent = msg.content
+		w.tdOverlay = true
 		return w, nil
 
 	case overlayResultMsg:
@@ -551,11 +585,9 @@ func (w *Workspace) updatePaneKeys(msg tea.KeyMsg) (*Workspace, tea.Cmd) {
 			}
 		}
 	case "t":
-		// Show td status for focused pane's worktree
+		// Show td status for focused pane's worktree (async to avoid blocking UI)
 		if w.paneIdx < len(w.panes) && w.panes[w.paneIdx].worktreeDir != "" {
-			content := fetchTdStatus(w.panes[w.paneIdx].worktreeDir)
-			w.tdContent = content
-			w.tdOverlay = true
+			return w, fetchTdStatusCmd(w.panes[w.paneIdx].worktreeDir)
 		}
 	case "y":
 		// Copy focused pane content to clipboard
@@ -1176,16 +1208,8 @@ func (w *Workspace) hasRunningPanes() bool {
 	return false
 }
 
-// updateGitStatuses fetches git status for all active panes and updates the sidebar.
-func (w *Workspace) updateGitStatuses() {
-	statuses := make(map[string]gitStatus)
-	for _, p := range w.panes {
-		if p.worktreeDir != "" {
-			statuses[p.name] = fetchGitStatus(p.worktreeDir)
-		}
-	}
-	w.sidebar.SetRepoStatuses(statuses)
-}
+// updateGitStatuses is now async — see fetchGitStatusesCmd in githelper.go.
+// The result is handled by gitStatusResultMsg in Update().
 
 // collectPaneNames returns names from all panes.
 func collectPaneNames(panes []termPaneModel) []string {
