@@ -157,11 +157,9 @@ func launchWorkspace(configDir string, initialTaskID string) error {
 		return buildTaskEntries()
 	}
 
-	sessionsDir := filepath.Join(configDir, "sessions")
 	logsDir := filepath.Join(configDir, "logs")
-	os.MkdirAll(sessionsDir, 0o755)
 	os.MkdirAll(logsDir, 0o755)
-	pm := process.NewProcessManager(sessionsDir, logsDir)
+	pm := process.NewProcessManager(logsDir)
 
 	// Task opener: loads task, launches agent PTYs, returns pane info per repo
 	opener := func(taskID string) ([]tui.PaneInit, error) {
