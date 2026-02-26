@@ -105,13 +105,13 @@ func (pm *ProcessManager) Start(info SessionInfo) (*RunningProcess, error) {
 	cmd.Env = append(os.Environ(), info.ExtraEnv...)
 
 	// Start with PTY so child process sees a real TTY (enables interactive prompts)
-	ptyFile, err := startWithPTY(cmd, defaultPTYRows, defaultPTYCols)
+	ptyFile, err := StartWithPTY(cmd, DefaultPTYRows, DefaultPTYCols)
 	if err != nil {
 		logFile.Close()
 		os.Remove(logPath)
 		return nil, fmt.Errorf("failed to start %q: %w", info.Name, err)
 	}
-	vterm := NewVTermScreen(int(defaultPTYRows), int(defaultPTYCols))
+	vterm := NewVTermScreen(int(DefaultPTYRows), int(DefaultPTYCols))
 
 	info.PID = cmd.Process.Pid
 	info.StartedAt = time.Now().Unix()
@@ -278,7 +278,7 @@ func (pm *ProcessManager) Reconnect() []*RunningProcess {
 		logPath := pm.logFilePath(info.Name)
 		var startOffset int64
 		if data, err := os.ReadFile(logPath); err == nil && len(data) > 0 {
-			logBuf.Write(sanitizeForLog(data))
+			logBuf.Write(SanitizeForLog(data))
 			logBuf.Flush()
 			startOffset = int64(len(data))
 		}
@@ -372,7 +372,7 @@ func (pm *ProcessManager) ResizePTY(name string, rows, cols uint16) error {
 	if rp == nil || rp.PtyFile == nil {
 		return fmt.Errorf("process %q has no PTY", name)
 	}
-	if err := resizePTY(rp.PtyFile, rows, cols); err != nil {
+	if err := ResizePTY(rp.PtyFile, rows, cols); err != nil {
 		return err
 	}
 	if rp.VTerm != nil {
@@ -453,7 +453,7 @@ func readPTY(ptyFile *os.File, logFile *os.File, vterm *VTermScreen, logBuf *Log
 			data := buf[:n]
 			logFile.Write(data)
 			vterm.Write(data)
-			logBuf.Write(sanitizeForLog(data))
+			logBuf.Write(SanitizeForLog(data))
 		}
 		if err != nil {
 			return
@@ -473,13 +473,13 @@ type sanitizingWriter struct {
 }
 
 func (sw sanitizingWriter) Write(p []byte) (int, error) {
-	_, err := sw.w.Write(sanitizeForLog(p))
+	_, err := sw.w.Write(SanitizeForLog(p))
 	return len(p), err
 }
 
 // tailFile reads from a log file starting at offset and writes new content to w.
 // Polls the file for new data until stop is closed.
-// Data is sanitized through sanitizeForLog before writing.
+// Data is sanitized through SanitizeForLog before writing.
 func tailFile(path string, w io.Writer, startOffset int64, stop <-chan struct{}) {
 	sw := sanitizingWriter{w: w}
 

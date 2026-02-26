@@ -1,11 +1,11 @@
 package process
 
-// sanitizeForLog strips terminal control sequences that don't render well
+// SanitizeForLog strips terminal control sequences that don't render well
 // in a scrollback log viewer. Keeps SGR (color/style) sequences intact.
 //
 // Strips: cursor movement, line/screen clearing, OSC (title), other CSI.
 // Converts standalone \r (not followed by \n) to \n for readability.
-func sanitizeForLog(data []byte) []byte {
+func SanitizeForLog(data []byte) []byte {
 	out := make([]byte, 0, len(data))
 	i := 0
 	for i < len(data) {
