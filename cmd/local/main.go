@@ -7,7 +7,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/kimaguri/simplx-toolkit/internal/config"
-	"github.com/kimaguri/simplx-toolkit/internal/process"
+	"github.com/kimaguri/simplx-toolkit/internal/devdash"
 	"github.com/kimaguri/simplx-toolkit/internal/tui"
 )
 
@@ -43,7 +43,7 @@ func main() {
 	}
 
 	// Initialize process manager
-	pm := process.NewProcessManager(sessionsDir, logsDir)
+	pm := devdash.NewProcessManager(sessionsDir, logsDir)
 
 	// Reconnect to existing sessions
 	reconnected := pm.Reconnect()

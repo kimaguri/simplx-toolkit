@@ -8,7 +8,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/kimaguri/simplx-toolkit/internal/process"
+	"github.com/kimaguri/simplx-toolkit/internal/devdash"
 )
 
 // --- Tunnel messages ---
@@ -193,9 +193,9 @@ func (m *tunnelOverlayModel) SetSize(w, h int) {
 // --- Tunnel commands ---
 
 // startTunnelCmd checks for cloudflared and starts a tunnel
-func startTunnelCmd(pm *process.ProcessManager, name string) tea.Cmd {
+func startTunnelCmd(pm *devdash.ProcessManager, name string) tea.Cmd {
 	return func() tea.Msg {
-		if !process.CloudflaredAvailable() {
+		if !devdash.CloudflaredAvailable() {
 			return cloudflaredMissingMsg{name: name}
 		}
 
@@ -206,7 +206,7 @@ func startTunnelCmd(pm *process.ProcessManager, name string) tea.Cmd {
 
 		select {
 		case url := <-ti.URLCh:
-			ti.Status = process.TunnelActive
+			ti.Status = devdash.TunnelActive
 			ti.URL = url
 			return tunnelStartedMsg{name: name, url: url}
 		case <-ti.Done:
@@ -215,7 +215,7 @@ func startTunnelCmd(pm *process.ProcessManager, name string) tea.Cmd {
 				err:  fmt.Errorf("cloudflared exited before providing URL"),
 			}
 		case <-time.After(30 * time.Second):
-			process.StopTunnel(ti)
+			devdash.StopTunnel(ti)
 			return tunnelErrorMsg{
 				name: name,
 				err:  fmt.Errorf("tunnel URL timeout (30s)"),
@@ -225,7 +225,7 @@ func startTunnelCmd(pm *process.ProcessManager, name string) tea.Cmd {
 }
 
 // stopTunnelCmd stops an active tunnel
-func stopTunnelCmd(pm *process.ProcessManager, name string) tea.Cmd {
+func stopTunnelCmd(pm *devdash.ProcessManager, name string) tea.Cmd {
 	return func() tea.Msg {
 		err := pm.StopProcessTunnel(name)
 		if err != nil {

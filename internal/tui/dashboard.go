@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/kimaguri/simplx-toolkit/internal/devdash"
 	"github.com/kimaguri/simplx-toolkit/internal/process"
 )
 
@@ -24,7 +25,7 @@ const (
 
 // dashboardModel is the main split-pane dashboard view
 type dashboardModel struct {
-	processes     []*process.RunningProcess
+	processes     []*devdash.RunningProcess
 	selected      int
 	focus         focusPanel
 	logViewport   viewport.Model
@@ -56,7 +57,7 @@ func (m dashboardModel) Init() tea.Cmd {
 }
 
 // SetProcesses updates the process list
-func (m *dashboardModel) SetProcesses(procs []*process.RunningProcess) {
+func (m *dashboardModel) SetProcesses(procs []*devdash.RunningProcess) {
 	// Sort by name for stable ordering
 	sort.Slice(procs, func(i, j int) bool {
 		return procs[i].Info.Name < procs[j].Info.Name
@@ -73,7 +74,7 @@ func (m *dashboardModel) SetProcesses(procs []*process.RunningProcess) {
 }
 
 // SelectedProcess returns the currently selected process, or nil
-func (m *dashboardModel) SelectedProcess() *process.RunningProcess {
+func (m *dashboardModel) SelectedProcess() *devdash.RunningProcess {
 	if m.selected >= 0 && m.selected < len(m.processes) {
 		return m.processes[m.selected]
 	}
@@ -502,17 +503,17 @@ func (m dashboardModel) renderSessionList(w, h int) string {
 }
 
 // renderSessionItem renders a single session item in the list
-func (m dashboardModel) renderSessionItem(idx int, rp *process.RunningProcess, width int) string {
+func (m dashboardModel) renderSessionItem(idx int, rp *devdash.RunningProcess, width int) string {
 	isSelected := idx == m.selected
 
 	// Status indicator
 	var statusIcon string
 	switch rp.Status {
-	case process.StatusRunning:
+	case devdash.StatusRunning:
 		statusIcon = statusRunning.Render("*")
-	case process.StatusStopped:
+	case devdash.StatusStopped:
 		statusIcon = statusStopped.Render("-")
-	case process.StatusError:
+	case devdash.StatusError:
 		statusIcon = statusError.Render("!")
 	}
 
@@ -550,11 +551,11 @@ func (m dashboardModel) renderSessionItem(idx int, rp *process.RunningProcess, w
 	if rp.Tunnel != nil {
 		var tunnelLine string
 		switch rp.Tunnel.Status {
-		case process.TunnelStarting:
+		case devdash.TunnelStarting:
 			tunnelLine = "     " + dimStyle.Render("tunnel: starting...")
-		case process.TunnelActive:
+		case devdash.TunnelActive:
 			tunnelLine = "     " + tunnelURLStyle.Render("tunnel: "+rp.Tunnel.URL)
-		case process.TunnelError:
+		case devdash.TunnelError:
 			tunnelLine = "     " + statusError.Render("tunnel: error")
 		}
 		if tunnelLine != "" {

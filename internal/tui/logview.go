@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/kimaguri/simplx-toolkit/internal/devdash"
 	"github.com/kimaguri/simplx-toolkit/internal/process"
 )
 
@@ -22,7 +23,7 @@ type LogLineMsg struct {
 type logViewModel struct {
 	sessionName   string
 	port          int
-	rp            *process.RunningProcess // reference to process (for PTY/VTerm access)
+	rp            *devdash.RunningProcess // reference to process (for PTY/VTerm access)
 	viewport      viewport.Model
 	logBuf        *process.LogBuffer
 	subCh         chan string
@@ -37,7 +38,7 @@ type logViewModel struct {
 }
 
 // newLogViewModel creates a new fullscreen log viewer
-func newLogViewModel(rp *process.RunningProcess) logViewModel {
+func newLogViewModel(rp *devdash.RunningProcess) logViewModel {
 	return logViewModel{
 		sessionName: rp.Info.Name,
 		port:        rp.Info.Port,

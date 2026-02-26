@@ -11,7 +11,7 @@ import (
 
 	"github.com/kimaguri/simplx-toolkit/internal/config"
 	"github.com/kimaguri/simplx-toolkit/internal/discovery"
-	"github.com/kimaguri/simplx-toolkit/internal/process"
+	"github.com/kimaguri/simplx-toolkit/internal/devdash"
 )
 
 // viewState tracks the current main view
@@ -38,7 +38,7 @@ type ProcessStatusMsg struct{}
 
 // App is the root tea.Model for the TUI application
 type App struct {
-	pm            *process.ProcessManager
+	pm            *devdash.ProcessManager
 	cfg           *config.LocalConfig
 	view          viewState
 	overlay       overlayState
@@ -56,7 +56,7 @@ type App struct {
 }
 
 // NewApp creates the root application model
-func NewApp(cfg *config.LocalConfig, pm *process.ProcessManager) App {
+func NewApp(cfg *config.LocalConfig, pm *devdash.ProcessManager) App {
 	wts := discovery.ScanWorktrees(cfg.ScanDirs)
 
 	dash := newDashboardModel()
@@ -523,10 +523,10 @@ func (a App) updateDashboardKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case "t":
 		sel := a.dashboard.SelectedProcess()
-		if sel == nil || sel.Status != process.StatusRunning {
+		if sel == nil || sel.Status != devdash.StatusRunning {
 			return a, nil
 		}
-		if sel.Tunnel != nil && sel.Tunnel.Status != process.TunnelOff {
+		if sel.Tunnel != nil && sel.Tunnel.Status != devdash.TunnelOff {
 			confirmText := fmt.Sprintf("Stop tunnel for %q?", sel.Info.Name)
 			a.confirm = newConfirmModel(confirmText, "stop-tunnel", sel.Info.Name)
 			a.confirm.SetSize(a.width, a.height)
@@ -738,7 +738,7 @@ func (a App) launchProcess(req LaunchRequestMsg) tea.Cmd {
 
 		cmd, args, extraEnv := config.DevCommand(proj.IsEncore, port, pmPath, filterPkg, req.Script)
 
-		info := process.SessionInfo{
+		info := devdash.SessionInfo{
 			Name:     sessionName,
 			Port:     port,
 			Command:  cmd,
