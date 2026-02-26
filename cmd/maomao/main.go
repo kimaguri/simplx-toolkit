@@ -120,6 +120,7 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	configDir := maomaoconfig.GlobalConfigDir()
 	os.MkdirAll(configDir, 0o755)
 	maomaolog.Init(configDir)
+	maomaolog.InitDiag(configDir)
 	event.Init(configDir)
 
 	// Run wizard if config is missing (standalone tea.Program)
@@ -597,6 +598,7 @@ func runTaskResume(cmd *cobra.Command, args []string) error {
 	configDir := maomaoconfig.GlobalConfigDir()
 	os.MkdirAll(configDir, 0o755)
 	maomaolog.Init(configDir)
+	maomaolog.InitDiag(configDir)
 	event.Init(configDir)
 	return launchWorkspace(configDir, args[0])
 }
@@ -611,6 +613,7 @@ func runTask(cmd *cobra.Command, args []string) error {
 	configDir := maomaoconfig.GlobalConfigDir()
 	os.MkdirAll(configDir, 0o755)
 	maomaolog.Init(configDir)
+	maomaolog.InitDiag(configDir)
 	event.Init(configDir)
 
 	repoPath, _ := filepath.Abs(args[1])
