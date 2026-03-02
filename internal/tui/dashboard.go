@@ -278,7 +278,7 @@ func (m dashboardModel) updateLogs(msg tea.KeyMsg) (dashboardModel, tea.Cmd) {
 		return m, nil
 	case "i":
 		sel := m.SelectedProcess()
-		if sel != nil && sel.PtyFile != nil {
+		if sel != nil && sel.StdinPipe != nil {
 			m.isInteractive = true
 			m.refreshInteractiveViewport()
 			return m, scheduleInteractiveTick()
@@ -380,14 +380,20 @@ func (m *dashboardModel) refreshLogViewport() {
 	}
 }
 
-// refreshInteractiveViewport renders VTerm screen content into the viewport
+// refreshInteractiveViewport renders VTerm or LogBuf content into the viewport
 func (m *dashboardModel) refreshInteractiveViewport() {
 	sel := m.SelectedProcess()
-	if sel == nil || sel.VTerm == nil {
+	if sel == nil {
 		return
 	}
-	content := sel.VTerm.Content()
-	m.logViewport.SetContent(content)
+	if sel.VTerm != nil {
+		content := sel.VTerm.Content()
+		m.logViewport.SetContent(content)
+	} else {
+		// Fallback: show log content (for daemon processes without VTerm)
+		content := wrapLogContent(m.logBuf.Content(), m.logViewport.Width)
+		m.logViewport.SetContent(content)
+	}
 	m.logViewport.GotoBottom()
 }
 

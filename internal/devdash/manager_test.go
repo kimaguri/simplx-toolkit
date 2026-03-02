@@ -9,33 +9,26 @@ import (
 	"github.com/kimaguri/simplx-toolkit/internal/process"
 )
 
-func TestReadPTYWritesToLogBuffer(t *testing.T) {
-	// Create a pipe to simulate PTY
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer r.Close()
-
-	logBuf := process.NewLogBuffer(100)
-	vterm := process.NewVTermScreen(24, 80)
+func TestTailFileWritesToLogBuffer(t *testing.T) {
+	// Create a temp log file simulating child process output
 	logFile, err := os.CreateTemp("", "test-log-*")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer os.Remove(logFile.Name())
-	defer logFile.Close()
 
+	logBuf := process.NewLogBuffer(100)
 	stop := make(chan struct{})
 
-	go readPTY(r, logFile, vterm, logBuf, stop)
+	// Start tailing (same as Start() does now)
+	go tailFile(logFile.Name(), logBuf, 0, stop)
 
-	// Write test data
-	w.Write([]byte("hello world\n"))
-	w.Close()
+	// Simulate child process writing to log file
+	logFile.Write([]byte("hello world\n"))
+	logFile.Sync()
 
-	// Give goroutine time to process
-	time.Sleep(100 * time.Millisecond)
+	// Give tailFile time to poll and read
+	time.Sleep(300 * time.Millisecond)
 	close(stop)
 
 	content := logBuf.Content()

@@ -53,6 +53,7 @@ type App struct {
 	worktrees      []discovery.Worktree
 	pendingLaunch  *LaunchRequestMsg // stored while waiting for deps install confirmation
 	pendingTunnel  string            // process name waiting for cloudflared install
+	pendingInstall string            // install process name → auto-launch main process on exit
 }
 
 // NewApp creates the root application model
@@ -142,9 +143,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			ptyCols = 1
 		}
 		for _, rp := range a.pm.List() {
-			if rp.PtyFile != nil {
-				_ = a.pm.ResizePTY(rp.Info.Name, ptyRows, ptyCols)
-			}
+			_ = a.pm.ResizePTY(rp.Info.Name, ptyRows, ptyCols)
 		}
 
 		switch a.view {
@@ -179,7 +178,9 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					pmBin = a.pendingLaunch.PackageManager
 				}
 				pmPath := resolveBinary(pmBin)
-				return a, installDeps(msg.Target, pmPath)
+				installName := fmt.Sprintf("install/%s", filepath.Base(msg.Target))
+				a.pendingInstall = installName
+				return a, a.startInstallProcess(msg.Target, pmPath)
 			case "stop-tunnel":
 				return a, stopTunnelCmd(a.pm, msg.Target)
 			case "install-cloudflared":
@@ -239,11 +240,16 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return a, a.launchProcess(msg)
 
-	case depsInstalledMsg:
+	case installDoneMsg:
+		a.pendingInstall = ""
+		// Clean up install process from sidebar
+		_ = a.pm.Stop(msg.name)
+		a.dashboard.SetProcesses(a.pm.List())
+
 		if msg.err != "" {
 			a.pendingLaunch = nil
 			return a, func() tea.Msg {
-				return processErrorMsg{name: "pnpm install", err: msg.err}
+				return processErrorMsg{name: msg.name, err: msg.err}
 			}
 		}
 		if a.pendingLaunch != nil {
@@ -305,6 +311,12 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+
+		// If this is an install process, watch for completion
+		if a.pendingInstall != "" && msg.name == a.pendingInstall {
+			cmds = append(cmds, a.watchInstallDone(msg.name))
+		}
+
 		return a, tea.Batch(cmds...)
 
 	case processStoppedMsg:
@@ -553,10 +565,8 @@ func (a App) updateDashboardKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			a.logView.SetSize(a.width, a.height)
 			a.view = viewLogFull
 
-			// Resize PTY to full width for fullscreen log view
-			if sel.PtyFile != nil {
-				_ = a.pm.ResizePTY(sel.Info.Name, uint16(a.height-2), uint16(a.width))
-			}
+			// Resize VTerm to full width for fullscreen log view
+			_ = a.pm.ResizePTY(sel.Info.Name, uint16(a.height-2), uint16(a.width))
 
 			var cmds []tea.Cmd
 			sizeMsg := tea.WindowSizeMsg{Width: a.width, Height: a.height}
@@ -626,9 +636,7 @@ func (a App) updateLogViewKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			ptyCols = 1
 		}
 		for _, rp := range a.pm.List() {
-			if rp.PtyFile != nil {
-				_ = a.pm.ResizePTY(rp.Info.Name, uint16(a.height-2), ptyCols)
-			}
+			_ = a.pm.ResizePTY(rp.Info.Name, uint16(a.height-2), ptyCols)
 		}
 
 		a.dashboard.SetProcesses(a.pm.List())
@@ -675,7 +683,7 @@ func (a App) View() string {
 	return base
 }
 
-// handleDashboardInteractiveKey forwards keys to PTY or exits interactive mode (dashboard)
+// handleDashboardInteractiveKey forwards keys to stdin or exits interactive mode (dashboard)
 func (a App) handleDashboardInteractiveKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if isExitInteractiveKey(msg) {
 		a.dashboard.isInteractive = false
@@ -806,21 +814,44 @@ func hasDeps(wtPath string) bool {
 	return false
 }
 
-// depsInstalledMsg is sent after pnpm install completes
-type depsInstalledMsg struct {
-	err string
+// installDoneMsg is sent when the install process finishes
+type installDoneMsg struct {
+	name string
+	err  string
 }
 
-// installDeps runs package manager install in the given directory
-func installDeps(dir string, pmPath string) tea.Cmd {
+// startInstallProcess launches package manager install as a visible process via ProcessManager
+func (a App) startInstallProcess(dir string, pmPath string) tea.Cmd {
+	pm := a.pm
 	return func() tea.Msg {
-		cmd := exec.Command(pmPath, "install")
-		cmd.Dir = dir
-		output, err := cmd.CombinedOutput()
-		if err != nil {
-			return depsInstalledMsg{err: fmt.Sprintf("%s install failed: %v\n%s", filepath.Base(pmPath), err, string(output))}
+		sessionName := fmt.Sprintf("install/%s", filepath.Base(dir))
+		info := devdash.SessionInfo{
+			Name:    sessionName,
+			Command: pmPath,
+			Args:    []string{"install"},
+			WorkDir: dir,
 		}
-		return depsInstalledMsg{}
+		_, err := pm.Start(info)
+		if err != nil {
+			return processErrorMsg{name: sessionName, err: err.Error()}
+		}
+		return processLaunchedMsg{name: sessionName}
+	}
+}
+
+// watchInstallDone blocks until the install process exits, then sends installDoneMsg
+func (a App) watchInstallDone(name string) tea.Cmd {
+	pm := a.pm
+	return func() tea.Msg {
+		rp := pm.Get(name)
+		if rp == nil {
+			return installDoneMsg{name: name, err: "process not found"}
+		}
+		<-rp.Done() // block until process exits
+		if rp.Status == devdash.StatusError {
+			return installDoneMsg{name: name, err: "install failed (see logs)"}
+		}
+		return installDoneMsg{name: name}
 	}
 }
 

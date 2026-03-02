@@ -42,12 +42,17 @@ type RunningProcess struct {
 	LogBuf    *process.LogBuffer
 	Status    ProcessStatus
 	StartedAt time.Time
-	PtyFile   *os.File             // PTY master fd (nil for reconnected processes)
+	StdinPipe *os.File             // stdin pipe write end (nil for reconnected processes)
 	VTerm     *process.VTermScreen // Virtual terminal screen (nil for reconnected)
 	Tunnel    *TunnelInfo          // Cloudflare tunnel (nil if none)
 	done      chan struct{}         // closed when process exits (by waitForExit)
 	tailStop  chan struct{}         // closed to stop the tail goroutine
 	logFile   *os.File             // log file handle (for started processes)
+}
+
+// Done returns a channel that is closed when the process exits
+func (rp *RunningProcess) Done() <-chan struct{} {
+	return rp.done
 }
 
 // ProcessManager manages the lifecycle of dev processes
@@ -98,14 +103,19 @@ func (pm *ProcessManager) Start(info SessionInfo) (*RunningProcess, error) {
 	cmd := exec.Command(info.Command, info.Args...)
 	cmd.Dir = info.WorkDir
 	cmd.Env = append(os.Environ(), info.ExtraEnv...)
+	// FORCE_COLOR: colored output even though stdout is a file, not a TTY
+	// CI=true: prevents Vite from calling process.exit() on stdin EOF
+	//          (Vite listens for stdin 'end' event and exits when CI!=true)
+	cmd.Env = append(cmd.Env, "FORCE_COLOR=3", "CLICOLOR_FORCE=1", "CI=true")
 
-	ptyFile, err := process.StartWithPTY(cmd, process.DefaultPTYRows, process.DefaultPTYCols)
+	// stdout/stderr → logFile (survives parent exit)
+	// stdin → pipe (child gets EOF on parent exit, not EIO)
+	stdinPipe, err := process.StartDaemon(cmd, logFile)
 	if err != nil {
 		logFile.Close()
 		os.Remove(logPath)
 		return nil, fmt.Errorf("failed to start %q: %w", info.Name, err)
 	}
-	vterm := process.NewVTermScreen(int(process.DefaultPTYRows), int(process.DefaultPTYCols))
 
 	info.PID = cmd.Process.Pid
 	info.StartedAt = time.Now().Unix()
@@ -124,19 +134,18 @@ func (pm *ProcessManager) Start(info SessionInfo) (*RunningProcess, error) {
 		LogBuf:    logBuf,
 		Status:    StatusRunning,
 		StartedAt: time.Unix(info.StartedAt, 0),
-		PtyFile:   ptyFile,
-		VTerm:     vterm,
+		StdinPipe: stdinPipe,
 		done:      done,
 		tailStop:  tailStop,
 		logFile:   logFile,
 	}
 	pm.processes[info.Name] = rp
 
-	// Read PTY output into logFile + VTerm + LogBuffer
-	go readPTY(ptyFile, logFile, vterm, logBuf, tailStop)
+	// Tail the log file for live output (same mechanism as reconnect)
+	go tailFile(logPath, logBuf, 0, tailStop)
 
 	// Wait for process exit
-	go pm.waitForExit(info.Name, cmd, logFile, done, tailStop, ptyFile)
+	go pm.waitForExit(info.Name, cmd, logFile, done, tailStop, stdinPipe)
 
 	return rp, nil
 }
@@ -160,15 +169,15 @@ func (pm *ProcessManager) waitForExit(
 	cmd *exec.Cmd,
 	logFile *os.File,
 	done, tailStop chan struct{},
-	ptyFile *os.File,
+	stdinPipe *os.File,
 ) {
 	err := cmd.Wait()
 
-	// Give PTY reader goroutine a moment to catch up on remaining output
+	// Give tail goroutine a moment to catch up on remaining output
 	time.Sleep(200 * time.Millisecond)
 	close(tailStop)
-	if ptyFile != nil {
-		ptyFile.Close()
+	if stdinPipe != nil {
+		stdinPipe.Close()
 	}
 	logFile.Close()
 	close(done)
@@ -268,28 +277,25 @@ func (pm *ProcessManager) Restart(name string) (*RunningProcess, error) {
 	return pm.Start(info)
 }
 
-// WriteInput sends raw bytes to the process via PTY stdin
+// WriteInput sends raw bytes to the process stdin
 func (pm *ProcessManager) WriteInput(name string, data []byte) error {
 	pm.mu.RLock()
 	defer pm.mu.RUnlock()
 	rp := pm.processes[name]
-	if rp == nil || rp.PtyFile == nil {
-		return fmt.Errorf("process %q has no PTY", name)
+	if rp == nil || rp.StdinPipe == nil {
+		return fmt.Errorf("process %q has no stdin pipe", name)
 	}
-	_, err := rp.PtyFile.Write(data)
+	_, err := rp.StdinPipe.Write(data)
 	return err
 }
 
-// ResizePTY changes the terminal window size for a process
+// ResizePTY changes the terminal window size for a process (no-op for daemon processes)
 func (pm *ProcessManager) ResizePTY(name string, rows, cols uint16) error {
 	pm.mu.RLock()
 	defer pm.mu.RUnlock()
 	rp := pm.processes[name]
-	if rp == nil || rp.PtyFile == nil {
-		return fmt.Errorf("process %q has no PTY", name)
-	}
-	if err := process.ResizePTY(rp.PtyFile, rows, cols); err != nil {
-		return err
+	if rp == nil {
+		return nil
 	}
 	if rp.VTerm != nil {
 		rp.VTerm.Resize(int(rows), int(cols))
@@ -358,33 +364,3 @@ func (pm *ProcessManager) Get(name string) *RunningProcess {
 	return pm.processes[name]
 }
 
-// readPTY reads from PTY master and writes to logFile + VTerm + LogBuffer.
-// logFile and VTerm get raw output; LogBuffer also gets raw output directly
-// (THE BUG FIX: no double-sanitization — LogBuffer receives raw PTY data,
-// sanitization happens only when reading from log files during reconnect).
-func readPTY(
-	ptyFile *os.File,
-	logFile *os.File,
-	vterm *process.VTermScreen,
-	logBuf *process.LogBuffer,
-	stop <-chan struct{},
-) {
-	buf := make([]byte, 4096)
-	for {
-		n, err := ptyFile.Read(buf)
-		if n > 0 {
-			data := buf[:n]
-			logFile.Write(data)
-			vterm.Write(data)
-			logBuf.Write(data)
-		}
-		if err != nil {
-			return
-		}
-		select {
-		case <-stop:
-			return
-		default:
-		}
-	}
-}

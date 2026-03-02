@@ -211,7 +211,7 @@ func (m logViewModel) Update(msg tea.Msg) (logViewModel, tea.Cmd) {
 			}
 			return m, nil
 		case "i":
-			if m.rp != nil && m.rp.PtyFile != nil {
+			if m.rp != nil && m.rp.StdinPipe != nil {
 				m.isInteractive = true
 				m.refreshInteractiveViewport()
 				return m, scheduleInteractiveTick()
@@ -317,13 +317,18 @@ func (m *logViewModel) refreshLogViewport() {
 	}
 }
 
-// refreshInteractiveViewport renders VTerm screen content into the viewport
+// refreshInteractiveViewport renders VTerm or log content into the viewport
 func (m *logViewModel) refreshInteractiveViewport() {
-	if m.rp == nil || m.rp.VTerm == nil {
+	if m.rp == nil {
 		return
 	}
-	content := m.rp.VTerm.Content()
-	m.viewport.SetContent(content)
+	if m.rp.VTerm != nil {
+		content := m.rp.VTerm.Content()
+		m.viewport.SetContent(content)
+	} else {
+		content := ansi.Wordwrap(m.logBuf.Content(), m.viewport.Width, "")
+		m.viewport.SetContent(content)
+	}
 	m.viewport.GotoBottom()
 }
 

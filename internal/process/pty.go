@@ -53,6 +53,37 @@ func StartWithPTY(cmd *exec.Cmd, rows, cols uint16) (*os.File, error) {
 	return ptmx, nil
 }
 
+// StartDaemon starts a process whose stdout/stderr go to logFile directly.
+// The child fully survives parent exit:
+//   - stdout/stderr → file (no EIO when parent exits)
+//   - stdin → pipe (child gets EOF, not EIO, when parent exits)
+//
+// Returns the pipe write end for interactive input (WriteInput).
+// The caller should set FORCE_COLOR=3 in cmd.Env for colored output.
+func StartDaemon(cmd *exec.Cmd, logFile *os.File) (*os.File, error) {
+	stdinR, stdinW, err := os.Pipe()
+	if err != nil {
+		return nil, err
+	}
+
+	cmd.Stdin = stdinR   // Pipe — child gets EOF when parent exits (harmless)
+	cmd.Stdout = logFile // File — survives parent exit
+	cmd.Stderr = logFile
+
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		Setpgid: true,
+	}
+
+	if err := cmd.Start(); err != nil {
+		stdinR.Close()
+		stdinW.Close()
+		return nil, err
+	}
+
+	stdinR.Close() // Child inherited its own copy
+	return stdinW, nil
+}
+
 // ResizePTY changes the terminal window size.
 func ResizePTY(ptyFile *os.File, rows, cols uint16) error {
 	return pty.Setsize(ptyFile, &pty.Winsize{Rows: rows, Cols: cols})
