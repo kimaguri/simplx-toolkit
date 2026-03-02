@@ -155,3 +155,21 @@ func Delete(id string) error {
 	}
 	return nil
 }
+
+// UpdateRepoSession sets the agent session ID for a specific repo within a task,
+// allowing session resume after restart. Returns an error if the task or repo is not found.
+func UpdateRepoSession(taskID, repoName, sessionID string) error {
+	t, err := Load(taskID)
+	if err != nil {
+		return fmt.Errorf("load task %q: %w", taskID, err)
+	}
+
+	for i := range t.Repos {
+		if t.Repos[i].Name == repoName {
+			t.Repos[i].SessionID = sessionID
+			return Save(t)
+		}
+	}
+
+	return fmt.Errorf("repo %q not found in task %q", repoName, taskID)
+}

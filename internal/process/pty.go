@@ -9,11 +9,16 @@ import (
 )
 
 const (
-	DefaultPTYRows uint16 = 24
-	DefaultPTYCols uint16 = 80
+	defaultPTYRows uint16 = 24
+	defaultPTYCols uint16 = 80
+
+	// DefaultPTYRows is the exported default for external packages (devdash)
+	DefaultPTYRows = defaultPTYRows
+	// DefaultPTYCols is the exported default for external packages (devdash)
+	DefaultPTYCols = defaultPTYCols
 )
 
-// StartWithPTY starts a process with a pseudo-terminal.
+// startWithPTY starts a process with a pseudo-terminal.
 // Returns the PTY master fd for reading output and writing input.
 //
 // Uses Setpgid (not Setsid) so the PTY is NOT the controlling terminal.
@@ -21,7 +26,7 @@ const (
 // processes survive TUI restarts and can be reconnected via log tailing.
 // The child still sees a real TTY (isatty=true) so colors and interactive
 // prompts work normally.
-func StartWithPTY(cmd *exec.Cmd, rows, cols uint16) (*os.File, error) {
+func startWithPTY(cmd *exec.Cmd, rows, cols uint16) (*os.File, error) {
 	ptmx, tty, err := pty.Open()
 	if err != nil {
 		return nil, err
@@ -84,7 +89,7 @@ func StartDaemon(cmd *exec.Cmd, logFile *os.File) (*os.File, error) {
 	return stdinW, nil
 }
 
-// ResizePTY changes the terminal window size.
-func ResizePTY(ptyFile *os.File, rows, cols uint16) error {
+// resizePTY changes the terminal window size.
+func resizePTY(ptyFile *os.File, rows, cols uint16) error {
 	return pty.Setsize(ptyFile, &pty.Winsize{Rows: rows, Cols: cols})
 }

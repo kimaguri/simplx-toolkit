@@ -17,8 +17,9 @@ type sidebarModel struct {
 	width        int
 	height       int
 	focused      bool
-	taskStatuses map[string]string    // task ID -> status ("running", "cached")
-	repoStatuses map[string]gitStatus // repoName -> git status
+	taskStatuses map[string]string        // task ID -> status ("running", "cached")
+	repoStatuses map[string]gitStatus     // repoName -> git status
+	tdSummaries  map[string]*tdTaskSummary // task ID -> TD summary
 }
 
 // newSidebar creates a sidebar populated with the given tasks.
@@ -142,6 +143,13 @@ func (s sidebarModel) View() string {
 			} else if t.Active {
 				mark = lipgloss.NewStyle().Foreground(catBlue).Render("●")
 			}
+			// Override mark based on task status (review/done)
+			switch t.Status {
+			case "review":
+				mark = lipgloss.NewStyle().Foreground(lipgloss.Color("#bb9af7")).Render("◈")
+			case "done":
+				mark = lipgloss.NewStyle().Foreground(lipgloss.Color("#9ece6a")).Render("✓")
+			}
 
 			// Truncate title to fit
 			maxTitleW := s.width - 21
@@ -185,7 +193,21 @@ func (s sidebarModel) View() string {
 			}
 
 			lines = append(lines, detail("type:", selected.Type))
-			lines = append(lines, detail("status:", selected.Status))
+
+			// Color-coded status display
+			statusVal := selected.Status
+			var statusRendered string
+			switch selected.Status {
+			case "review":
+				statusRendered = lipgloss.NewStyle().Foreground(lipgloss.Color("#bb9af7")).Render(statusVal)
+			case "done":
+				statusRendered = lipgloss.NewStyle().Foreground(lipgloss.Color("#9ece6a")).Render(statusVal)
+			case "active":
+				statusRendered = lipgloss.NewStyle().Foreground(catBlue).Render(statusVal)
+			default:
+				statusRendered = dimSt.Render(statusVal)
+			}
+			lines = append(lines, fmt.Sprintf("   %s %s", graySt.Render("status:"), statusRendered))
 
 			repoWord := "repos"
 			if selected.Repos == 1 {
@@ -210,6 +232,38 @@ func (s sidebarModel) View() string {
 						display = display[:maxRepoW-1] + "\u2026"
 					}
 					lines = append(lines, dimSt.Render("     \u2022 "+display))
+				}
+			}
+
+			// Time tracking stats
+			if selected.ActiveTime != "" {
+				lines = append(lines, "")
+				timeColor := lipgloss.Color("#7dcfff")
+				if !s.focused {
+					timeColor = lipgloss.Color("#3b4261")
+				}
+				timeSt := lipgloss.NewStyle().Foreground(timeColor)
+				lines = append(lines, fmt.Sprintf("   %s %s %s %s",
+					timeSt.Render("\u23F1"),
+					dimSt.Render(selected.ActiveTime),
+					graySt.Render("today:"),
+					dimSt.Render(selected.TodayTime)))
+				lines = append(lines, fmt.Sprintf("   %s %s",
+					graySt.Render("sessions:"),
+					dimSt.Render(fmt.Sprintf("%d", selected.SessionCount))))
+			}
+
+			// TD task progress
+			if s.tdSummaries != nil {
+				if ts, ok := s.tdSummaries[selected.ID]; ok && ts != nil && ts.Total > 0 {
+					lines = append(lines, "")
+					tdLabel := ts.Label()
+					if len(tdLabel) > s.width-8 {
+						tdLabel = tdLabel[:s.width-11] + "..."
+					}
+					lines = append(lines, fmt.Sprintf("   %s %s",
+						graySt.Render("td:"),
+						dimSt.Render(tdLabel)))
 				}
 			}
 		}
@@ -354,6 +408,14 @@ func (s *sidebarModel) SelectedTask() *TaskEntry {
 // SetRepoStatuses updates the cached git status for each repo.
 func (s *sidebarModel) SetRepoStatuses(statuses map[string]gitStatus) {
 	s.repoStatuses = statuses
+}
+
+// SetTdSummary updates the cached TD summary for a task.
+func (s *sidebarModel) SetTdSummary(taskID string, summary *tdTaskSummary) {
+	if s.tdSummaries == nil {
+		s.tdSummaries = make(map[string]*tdTaskSummary)
+	}
+	s.tdSummaries[taskID] = summary
 }
 
 // SetTasks replaces the task list and clamps the cursor to valid bounds.

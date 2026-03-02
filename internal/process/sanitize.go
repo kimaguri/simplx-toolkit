@@ -1,11 +1,24 @@
 package process
 
-// SanitizeForLog strips terminal control sequences that don't render well
+import "bytes"
+
+// sanitizeForLog strips terminal control sequences that don't render well
 // in a scrollback log viewer. Keeps SGR (color/style) sequences intact.
 //
-// Strips: cursor movement, line/screen clearing, OSC (title), other CSI.
-// Converts standalone \r (not followed by \n) to \n for readability.
+// Special handling:
+//   - CSI <n> C (Cursor Forward / CUF) → replaced with n spaces.
+//     Claude Code and other Ink-based TUIs use CUF instead of literal
+//     space characters for visual spacing between words.
+//   - SGR sequences (final byte 'm') are preserved for colors.
+//   - All other CSI sequences are stripped.
+//   - OSC sequences (ESC ] ... BEL/ST) are stripped.
+//   - Standalone \r → \n, \r\n → \n.
+// SanitizeForLog is the exported version for use by external packages (devdash).
 func SanitizeForLog(data []byte) []byte {
+	return sanitizeForLog(data)
+}
+
+func sanitizeForLog(data []byte) []byte {
 	out := make([]byte, 0, len(data))
 	i := 0
 	for i < len(data) {
@@ -27,11 +40,21 @@ func SanitizeForLog(data []byte) []byte {
 					j++
 				}
 				if j < len(data) && data[j] >= 0x40 && data[j] <= 0x7e {
-					if data[j] == 'm' {
+					finalByte := data[j]
+					switch {
+					case finalByte == 'm':
 						// SGR (Select Graphic Rendition) — keep colors
 						out = append(out, data[i:j+1]...)
+					case finalByte == 'C':
+						// CUF (Cursor Forward) — replace with spaces.
+						// ESC [ <n> C moves cursor right by n (default 1).
+						n := parseCSIParam(data[i+2 : j])
+						if n <= 0 {
+							n = 1
+						}
+						out = append(out, bytes.Repeat([]byte{' '}, n)...)
 					}
-					// All other CSI sequences: stripped
+					// All other CSI sequences: stripped silently
 					i = j + 1
 					continue
 				}
@@ -81,4 +104,19 @@ func SanitizeForLog(data []byte) []byte {
 		i++
 	}
 	return out
+}
+
+// parseCSIParam extracts the first numeric parameter from CSI parameter bytes.
+// Returns the parsed integer, or 0 if no valid number found.
+// For "12" returns 12, for "1;2" returns 1, for "" returns 0.
+func parseCSIParam(params []byte) int {
+	n := 0
+	for _, b := range params {
+		if b >= '0' && b <= '9' {
+			n = n*10 + int(b-'0')
+		} else {
+			break // stop at first non-digit (e.g., ';' or '?')
+		}
+	}
+	return n
 }

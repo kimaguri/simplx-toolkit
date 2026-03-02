@@ -6,6 +6,8 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 type gitStatus struct {
@@ -13,6 +15,23 @@ type gitStatus struct {
 	Added     int
 	Deleted   int
 	Untracked int
+}
+
+// gitStatusResultMsg carries async git status results back to the Update loop.
+type gitStatusResultMsg struct {
+	statuses map[string]gitStatus
+}
+
+// fetchGitStatusesCmd returns a tea.Cmd that fetches git status for all dirs
+// in a background goroutine, avoiding blocking the Bubbletea event loop.
+func fetchGitStatusesCmd(dirs map[string]string) tea.Cmd {
+	return func() tea.Msg {
+		statuses := make(map[string]gitStatus, len(dirs))
+		for name, dir := range dirs {
+			statuses[name] = fetchGitStatus(dir)
+		}
+		return gitStatusResultMsg{statuses: statuses}
+	}
 }
 
 // Label returns a compact status string like "M:3 A:1" or "clean"

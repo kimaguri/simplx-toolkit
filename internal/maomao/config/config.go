@@ -22,6 +22,7 @@ type GlobalConfig struct {
 	ScanDirs     []string             `toml:"scan_dirs"`
 	Branch       BranchSection        `toml:"branch"`
 	Agents       map[string]AgentConf `toml:"agents"`
+	Hooks        HooksConfig          `toml:"hooks"`
 }
 
 type AgentConf struct {
