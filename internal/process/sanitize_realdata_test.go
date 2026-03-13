@@ -7,7 +7,9 @@ import (
 )
 
 // TestSanitize_RealClaudeCodeLog runs the sanitizer on an actual Claude Code
-// PTY log file and verifies that spaces are preserved.
+// PTY log file and verifies basic output quality.
+// Note: cursor-up handling truncates overwritten content, so the output
+// represents the final screen state, not the full session history.
 func TestSanitize_RealClaudeCodeLog(t *testing.T) {
 	logPath := os.ExpandEnv("${HOME}/.config/maomao/logs/toolkit:simplx-toolkit.log")
 	data, err := os.ReadFile(logPath)
@@ -23,19 +25,11 @@ func TestSanitize_RealClaudeCodeLog(t *testing.T) {
 
 	t.Logf("sanitized output: %d lines", len(lines))
 
-	// Look for known content from the Claude Code session
-	fullText := output
-
-	// Check that "Claude Code" has a space (not "ClaudeCode")
-	if strings.Contains(fullText, "ClaudeCode") {
+	// Check that CUF still produces spaces (no "ClaudeCode" without space)
+	if strings.Contains(output, "ClaudeCode") {
 		t.Error("Found 'ClaudeCode' without space — CUF not converted")
 	}
-	if !strings.Contains(fullText, "Claude Code") {
-		t.Error("'Claude Code' not found in sanitized output")
-	}
-
-	// Check "Welcome back" has spaces
-	if strings.Contains(fullText, "Welcomeback") {
+	if strings.Contains(output, "Welcomeback") {
 		t.Error("Found 'Welcomeback' without space")
 	}
 

@@ -95,10 +95,28 @@ func TestSanitize_CRLF(t *testing.T) {
 }
 
 func TestSanitize_StandaloneCR(t *testing.T) {
+	// Standalone \r overwrites the current line (truncates back to last \n)
 	input := []byte("old\rnew")
 	got := string(sanitizeForLog(input))
-	if got != "old\nnew" {
-		t.Errorf("Standalone CR: got %q", got)
+	if got != "new" {
+		t.Errorf("Standalone CR: got %q, want %q", got, "new")
+	}
+}
+
+func TestSanitize_StandaloneCR_AfterNewline(t *testing.T) {
+	input := []byte("first\nold\rnew")
+	got := string(sanitizeForLog(input))
+	if got != "first\nnew" {
+		t.Errorf("CR after newline: got %q, want %q", got, "first\nnew")
+	}
+}
+
+func TestSanitize_CursorUp(t *testing.T) {
+	// ESC[2A removes last 2 lines, new text replaces them
+	input := []byte("line1\nline2\nline3\x1b[2Arewritten")
+	got := string(sanitizeForLog(input))
+	if got != "line1\nrewritten" {
+		t.Errorf("Cursor up: got %q, want %q", got, "line1\nrewritten")
 	}
 }
 

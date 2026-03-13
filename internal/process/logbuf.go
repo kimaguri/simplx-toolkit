@@ -163,3 +163,24 @@ func (lb *LogBuffer) Len() int {
 	defer lb.mu.RUnlock()
 	return len(lb.lines)
 }
+
+// RemoveLastLines removes the partial line and n complete lines from the end.
+// Used when cursor-up (ESC[nA) requires erasing previously written content.
+func (lb *LogBuffer) RemoveLastLines(n int) {
+	lb.mu.Lock()
+	defer lb.mu.Unlock()
+	lb.partial = ""
+	remove := n
+	if remove > len(lb.lines) {
+		remove = len(lb.lines)
+	}
+	lb.lines = lb.lines[:len(lb.lines)-remove]
+}
+
+// ClearPartial discards the current partial (incomplete) line.
+// Used when carriage return (\r) overwrites the current line.
+func (lb *LogBuffer) ClearPartial() {
+	lb.mu.Lock()
+	defer lb.mu.Unlock()
+	lb.partial = ""
+}

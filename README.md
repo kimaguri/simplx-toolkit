@@ -13,7 +13,7 @@ Processes run in the background and persist after quitting — re-running `devda
 brew install kimaguri/simplx-toolkit/devdash
 
 # Go install
-go install github.com/kimaguri/simplx-toolkit/cmd/local@latest
+go install github.com/kimaguri/simplx-toolkit/cmd/devdash@latest
 
 # From source
 git clone https://github.com/kimaguri/simplx-toolkit.git

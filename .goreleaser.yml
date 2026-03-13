@@ -4,7 +4,7 @@ project_name: simplx-toolkit
 
 builds:
   - id: devdash
-    main: ./cmd/local
+    main: ./cmd/devdash
     binary: devdash
     env:
       - CGO_ENABLED=0

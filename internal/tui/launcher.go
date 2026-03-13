@@ -202,8 +202,24 @@ func (m launcherModel) advanceFromRepo() (launcherModel, tea.Cmd) {
 		}
 	}
 
-	m.directories = dirs
-	m.dirProjects = dirProjects
+	// Sort directories by LastModified desc (freshest first)
+	// Build index slice so we can sort dirs and dirProjects together
+	idx := make([]int, len(dirs))
+	for i := range idx {
+		idx[i] = i
+	}
+	sort.SliceStable(idx, func(a, b int) bool {
+		return dirs[idx[a]].LastModified.After(dirs[idx[b]].LastModified)
+	})
+	sortedDirs := make([]discovery.Worktree, len(dirs))
+	sortedProjects := make([][]discovery.Project, len(dirs))
+	for i, j := range idx {
+		sortedDirs[i] = dirs[j]
+		sortedProjects[i] = dirProjects[j]
+	}
+
+	m.directories = sortedDirs
+	m.dirProjects = sortedProjects
 	m.dirIndex = 0
 
 	// Auto-skip directory step if only main dir exists

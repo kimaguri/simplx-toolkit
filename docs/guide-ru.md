@@ -11,7 +11,7 @@ devdash — терминальный дашборд для управления 
 brew install kimaguri/simplx-toolkit/devdash
 
 # Или через Go
-go install github.com/kimaguri/simplx-toolkit/cmd/local@latest
+go install github.com/kimaguri/simplx-toolkit/cmd/devdash@latest
 ```
 
 Проверка:

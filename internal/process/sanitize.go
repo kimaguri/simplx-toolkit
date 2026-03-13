@@ -7,12 +7,14 @@ import "bytes"
 //
 // Special handling:
 //   - CSI <n> C (Cursor Forward / CUF) → replaced with n spaces.
-//     Claude Code and other Ink-based TUIs use CUF instead of literal
-//     space characters for visual spacing between words.
+//   - CSI <n> A (Cursor Up / CUU) → removes last n lines from output.
+//   - CSI J / CSI 0J (Erase Below / ED) → truncates output after current line.
 //   - SGR sequences (final byte 'm') are preserved for colors.
 //   - All other CSI sequences are stripped.
 //   - OSC sequences (ESC ] ... BEL/ST) are stripped.
-//   - Standalone \r → \n, \r\n → \n.
+//   - Standalone \r → overwrites current line (truncates back to last \n).
+//   - \r\n → \n.
+//
 // SanitizeForLog is the exported version for use by external packages (devdash).
 func SanitizeForLog(data []byte) []byte {
 	return sanitizeForLog(data)
@@ -47,12 +49,27 @@ func sanitizeForLog(data []byte) []byte {
 						out = append(out, data[i:j+1]...)
 					case finalByte == 'C':
 						// CUF (Cursor Forward) — replace with spaces.
-						// ESC [ <n> C moves cursor right by n (default 1).
 						n := parseCSIParam(data[i+2 : j])
 						if n <= 0 {
 							n = 1
 						}
 						out = append(out, bytes.Repeat([]byte{' '}, n)...)
+					case finalByte == 'A':
+						// CUU (Cursor Up) — remove last n rows from output.
+						// Interactive menus use ESC[nA + ESC[J to redraw.
+						n := parseCSIParam(data[i+2 : j])
+						if n <= 0 {
+							n = 1
+						}
+						out = cursorUpTruncate(out, n)
+					case finalByte == 'J':
+						// ED (Erase in Display) — erase from cursor down.
+						// After cursor-up, this clears old content below.
+						// We handle this implicitly: cursor-up already truncated,
+						// and new content will be appended fresh.
+					case finalByte == 'K':
+						// EL (Erase in Line) — erase from cursor to end of line.
+						// Handled implicitly by \r truncation.
 					}
 					// All other CSI sequences: stripped silently
 					i = j + 1
@@ -93,8 +110,8 @@ func sanitizeForLog(data []byte) []byte {
 				out = append(out, '\n')
 				i += 2
 			} else {
-				// Standalone \r (line overwrite) → \n for log readability
-				out = append(out, '\n')
+				// Standalone \r — overwrite current line (truncate back to last \n)
+				out = truncateToLineStart(out)
 				i++
 			}
 			continue
@@ -104,6 +121,46 @@ func sanitizeForLog(data []byte) []byte {
 		i++
 	}
 	return out
+}
+
+// truncateToLineStart truncates buf back to the position just after the last \n.
+// If no \n exists, truncates to empty.
+func truncateToLineStart(buf []byte) []byte {
+	for k := len(buf) - 1; k >= 0; k-- {
+		if buf[k] == '\n' {
+			return buf[:k+1]
+		}
+	}
+	return buf[:0]
+}
+
+// cursorUpTruncate removes the current row and (n-1) complete rows above it.
+// Used for ESC[nA: cursor moves up n rows, subsequent text overwrites from there.
+func cursorUpTruncate(out []byte, n int) []byte {
+	// Remove current row content (partial line or empty row after \n)
+	if len(out) > 0 && out[len(out)-1] == '\n' {
+		// Cursor is on empty row after trailing \n — consume the \n
+		out = out[:len(out)-1]
+	}
+	// Remove remaining content on the current row
+	for len(out) > 0 && out[len(out)-1] != '\n' {
+		out = out[:len(out)-1]
+	}
+	// One row removed. Now remove (n-1) more complete lines above.
+	for i := 0; i < n-1 && len(out) > 0; i++ {
+		if out[len(out)-1] == '\n' {
+			out = out[:len(out)-1]
+		}
+		for len(out) > 0 && out[len(out)-1] != '\n' {
+			out = out[:len(out)-1]
+		}
+	}
+	return out
+}
+
+// ParseCSIParam is the exported version of parseCSIParam.
+func ParseCSIParam(params []byte) int {
+	return parseCSIParam(params)
 }
 
 // parseCSIParam extracts the first numeric parameter from CSI parameter bytes.

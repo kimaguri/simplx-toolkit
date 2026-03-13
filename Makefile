@@ -8,7 +8,7 @@ LDFLAGS=-s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT)
 build: build-devdash build-maomao
 
 build-devdash:
-	$(GO) build -ldflags "$(LDFLAGS)" -o devdash ./cmd/local
+	$(GO) build -ldflags "$(LDFLAGS)" -o devdash ./cmd/devdash
 
 build-maomao:
 	$(GO) build -ldflags "$(LDFLAGS)" -o maomao ./cmd/maomao
