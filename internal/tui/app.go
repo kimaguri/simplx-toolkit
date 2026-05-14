@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -33,6 +34,9 @@ const (
 	overlayTunnel
 )
 
+// interactiveExitWindow is the max delay between two Esc presses to exit interactive mode
+const interactiveExitWindow = 500 * time.Millisecond
+
 // ProcessStatusMsg is sent periodically to refresh process list statuses
 type ProcessStatusMsg struct{}
 
@@ -54,6 +58,7 @@ type App struct {
 	pendingLaunch  *LaunchRequestMsg // stored while waiting for deps install confirmation
 	pendingTunnel  string            // process name waiting for cloudflared install
 	pendingInstall string            // install process name → auto-launch main process on exit
+	lastEsc        time.Time         // last Esc inside interactive mode; stale values are harmless because the window check is monotonic
 }
 
 // NewApp creates the root application model
@@ -685,16 +690,21 @@ func (a App) View() string {
 
 // handleDashboardInteractiveKey forwards keys to stdin or exits interactive mode (dashboard)
 func (a App) handleDashboardInteractiveKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	if isExitInteractiveKey(msg) {
+	exit, newLast, forward := shouldExitInteractive(time.Now(), a.lastEsc, msg, interactiveExitWindow)
+	a.lastEsc = newLast
+	if exit {
 		a.dashboard.isInteractive = false
+		a.lastEsc = time.Time{}
 		a.dashboard.refreshLogViewport()
 		return a, nil
 	}
-	sel := a.dashboard.SelectedProcess()
-	if sel != nil {
-		raw := keyMsgToBytes(msg)
-		if raw != nil {
-			_ = a.pm.WriteInput(sel.Info.Name, raw)
+	if forward {
+		sel := a.dashboard.SelectedProcess()
+		if sel != nil {
+			raw := keyMsgToBytes(msg)
+			if raw != nil {
+				_ = a.pm.WriteInput(sel.Info.Name, raw)
+			}
 		}
 	}
 	return a, nil
@@ -702,14 +712,19 @@ func (a App) handleDashboardInteractiveKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) 
 
 // handleLogViewInteractiveKey forwards keys to PTY or exits interactive mode (logview)
 func (a App) handleLogViewInteractiveKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	if isExitInteractiveKey(msg) {
+	exit, newLast, forward := shouldExitInteractive(time.Now(), a.lastEsc, msg, interactiveExitWindow)
+	a.lastEsc = newLast
+	if exit {
 		a.logView.isInteractive = false
+		a.lastEsc = time.Time{}
 		a.logView.refreshLogViewport()
 		return a, nil
 	}
-	raw := keyMsgToBytes(msg)
-	if raw != nil {
-		_ = a.pm.WriteInput(a.logView.sessionName, raw)
+	if forward {
+		raw := keyMsgToBytes(msg)
+		if raw != nil {
+			_ = a.pm.WriteInput(a.logView.sessionName, raw)
+		}
 	}
 	return a, nil
 }

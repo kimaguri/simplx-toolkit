@@ -65,9 +65,3 @@ func shouldExitInteractive(now time.Time, lastEsc time.Time, msg tea.KeyMsg, win
 	}
 	return false, now, true
 }
-
-// isExitInteractiveKey is kept temporarily for backwards compat with app.go callers.
-// B4 replaces these callers with shouldExitInteractive and removes this shim.
-func isExitInteractiveKey(msg tea.KeyMsg) bool {
-	return msg.Type == tea.KeyCtrlCloseBracket
-}
