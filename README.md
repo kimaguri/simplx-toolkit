@@ -142,7 +142,7 @@ Forwards all input to the running process PTY. Useful for interactive prompts, p
 
 | Key | Action |
 |-----|--------|
-| `ctrl+]` | Exit interactive mode |
+| `esc esc` | Exit interactive mode (two Esc presses within 500ms) |
 | *everything else* | Sent to process stdin |
 
 ### Fullscreen Log View

@@ -666,7 +666,7 @@ func (m dashboardModel) renderHelpBar() string {
 		if m.isInteractive {
 			keys = []struct{ key, desc string }{
 				{"INTERACTIVE", ""},
-				{"Ctrl+]", "exit"},
+				{"esc esc", "exit"},
 			}
 		} else if m.selection.isActive() {
 			keys = []struct{ key, desc string }{
