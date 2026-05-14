@@ -343,7 +343,7 @@ func (m logViewModel) View() string {
 	scrollInfo := fmt.Sprintf("scroll: %d/%d ", m.viewport.YOffset+m.viewport.Height, m.viewport.TotalLineCount())
 	helpText := " q:back  G:bottom  g:top  c:copy  y:copy all  v:select  /:search  i:interactive "
 	if m.isInteractive {
-		helpText = " INTERACTIVE  Ctrl+]:exit "
+		helpText = " INTERACTIVE  esc esc:exit "
 	}
 
 	// Append clipboard feedback to help text if present
