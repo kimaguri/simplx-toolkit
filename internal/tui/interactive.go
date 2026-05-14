@@ -49,8 +49,25 @@ func keyMsgToBytes(msg tea.KeyMsg) []byte {
 	}
 }
 
-// isExitInteractiveKey checks if the key combination exits interactive mode.
-// Ctrl+] (0x1d) = Group Separator.
+// shouldExitInteractive decides whether an inbound key should exit interactive mode.
+// Behavior:
+//   - Non-Esc key: forward to PTY, disarm latch (returns zero lastEsc).
+//   - First Esc (or Esc after window expired): arm — return newLastEsc=now, forward to PTY.
+//   - Second Esc within window: exit — return exit=true, no forward, newLastEsc=zero.
+//
+// The caller owns the timestamp; this function is pure.
+func shouldExitInteractive(now time.Time, lastEsc time.Time, msg tea.KeyMsg, window time.Duration) (exit bool, newLastEsc time.Time, forward bool) {
+	if msg.Type != tea.KeyEscape {
+		return false, time.Time{}, true
+	}
+	if !lastEsc.IsZero() && now.Sub(lastEsc) <= window {
+		return true, time.Time{}, false
+	}
+	return false, now, true
+}
+
+// isExitInteractiveKey is kept temporarily for backwards compat with app.go callers.
+// B4 replaces these callers with shouldExitInteractive and removes this shim.
 func isExitInteractiveKey(msg tea.KeyMsg) bool {
 	return msg.Type == tea.KeyCtrlCloseBracket
 }
