@@ -12,3 +12,7 @@ dist/
 
 # Agent workspace
 .maomao/
+CLAUDE.md
+**/CLAUDE.md
+.serena/
+.worktrees/
