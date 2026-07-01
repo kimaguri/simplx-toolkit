@@ -199,13 +199,16 @@ devdash auto-discovers projects in your scan directories:
 
 ## Configuration
 
-All data stored in `~/.config/local-dev/`:
+All data stored in `~/.config/devdash/` (migrated automatically from the
+legacy `~/.config/local-dev/` — see [Config directory migration](#config-directory-migration)):
 
 ```
-~/.config/local-dev/
+~/.config/devdash/
 ├── config.json       # Scan directories and port overrides
 ├── sessions/         # Session state (one JSON per process)
-└── logs/             # Process logs (persist across restarts)
+├── logs/             # Process logs (persist across restarts)
+├── projects/         # Central per-project orchestrator config (<name>.json)
+└── instances/         # Orchestrator instance registry (<slug>.json)
 ```
 
 ### config.json
@@ -230,7 +233,7 @@ All data stored in `~/.config/local-dev/`:
 
 ### Session Files
 
-Each running process has a session file at `~/.config/local-dev/sessions/{name}.json`:
+Each running process has a session file at `~/.config/devdash/sessions/{name}.json`:
 
 ```json
 {
@@ -283,6 +286,162 @@ devdash              Start the TUI dashboard
 devdash --help       Show help
 devdash --version    Show version
 ```
+
+## Multi-Repo Orchestrator
+
+Beyond the TUI, devdash can bring up a whole per-task environment spread
+across several git-worktree repositories with a single deterministic
+command — no manual port assignment, no hand-managed URLs. Each service is
+reached at a stable domain `<slug>-<service>.<domainSuffix>` behind a
+shared [Caddy](https://caddyserver.com/) reverse proxy, transparently
+mixing locally-spawned dev processes with remote test-server upstreams.
+
+### Commands
+
+#### `devdash up`
+
+```
+devdash up --project <name> [--branch <branch>] [--local <svc>]... [--remote <svc>]...
+```
+
+Resolves the project config, resolves each service's mode (config default,
+overridden by `--local`/`--remote`), locates each local service's worktree
+by branch, spawns it on an OS-assigned free port, ensures Caddy is running,
+writes routes for every service (local and remote), and records instance
+state in the registry. Idempotent — re-running `up` for an already-up
+instance starts only what's missing.
+
+```
+$ devdash up --project simplx --branch orders-refactor --local core
+instance simplx/orders-refactor (slug orders-refactor)
+  front     local   http://orders-refactor-front.simplx.localhost      ~/.config/devdash/logs/dev-orders-refactor-front.log
+  mfe       local   http://orders-refactor-mfe.simplx.localhost        ~/.config/devdash/logs/dev-orders-refactor-mfe.log
+  core      local   http://orders-refactor-core.simplx.localhost       ~/.config/devdash/logs/dev-orders-refactor-core.log
+  platform  remote  http://orders-refactor-platform.simplx.localhost   → https://platform-test.sadmin.app
+logs:   devdash logs orders-refactor [service] [--tail N]
+status: devdash status orders-refactor
+```
+
+#### `devdash down`
+
+```
+devdash down <instance>
+```
+
+Stops the instance's local processes, removes its routes (the
+`<slug>-*` group) and registry entry. Remote upstreams and the shared
+Caddy daemon are left untouched, and other instances are unaffected. An
+unknown or already-down instance is reported as "not running" (exit 0,
+non-destructive).
+
+#### `devdash status`
+
+```
+devdash status [instance]
+```
+
+Lists running instances grouped by `project/branch` (or just one, when
+named). Each row shows mode, URL, port and pid (local), status, and log
+path; remote services appear as proxy rows with their upstream.
+
+```
+▾ simplx / orders-refactor
+    front      local   running  :53412  pid 4123   http://orders-refactor-front.simplx.localhost   ~/.config/devdash/logs/dev-orders-refactor-front.log
+    core       local   running  :53588  pid 4130   http://orders-refactor-core.simplx.localhost    ~/.config/devdash/logs/dev-orders-refactor-core.log
+    platform   remote  proxy             http://orders-refactor-platform.simplx.localhost → https://platform-test.sadmin.app
+```
+
+#### `devdash logs`
+
+```
+devdash logs <instance> [service] [--tail N] [--follow] [--timeout <dur>]
+```
+
+Prints a service's output as plain text with ANSI escapes stripped.
+Omitting `[service]` merges all of the instance's services, each line
+prefixed `[service]`. `--tail N` defaults to 50 trailing lines.
+`--follow` streams new output until `--timeout` elapses (default cap
+60s — never blocks indefinitely). Requesting logs for a remote service
+reports "service is remote (no local log)" rather than erroring.
+
+Run `devdash <sub> --help` or `devdash help <sub>` for full flag and
+example details on any of the above.
+
+### Project configuration
+
+A project can be configured either in a repo-root `dev.config.json` file
+(takes precedence when present) or centrally at
+`~/.config/devdash/projects/<name>.json`. Central config lets an operator
+fully configure a project without needing write access to any of its
+repos.
+
+Example (`~/.config/devdash/projects/simplx.json`):
+
+```json
+{
+  "name": "simplx",
+  "domainSuffix": "simplx.localhost",
+  "layout": "worktree",
+  "repos": {
+    "apps": "~/x/simplx/simplx-apps",
+    "core": "~/x/simplx/simplx-core",
+    "platform": "~/x/simplx/platform"
+  },
+  "services": {
+    "front":    { "repo": "apps",     "package": "host",    "script": "dev", "mode": "local" },
+    "mfe":      { "repo": "apps",     "package": "plugins", "script": "dev", "mode": "local" },
+    "core":     { "repo": "core",     "package": "core-ui", "script": "dev", "mode": "remote", "remote": "https://core-test.sadmin.app" },
+    "platform": { "repo": "platform", "package": "",        "script": "dev", "mode": "remote", "remote": "https://platform-test.sadmin.app" }
+  },
+  "env": {
+    "VITE_SIMPLX_CORE_URL": "{core}",
+    "VITE_API_URL":         "{platform}/api/v1",
+    "VITE_MAINFRAME_URL":   "ws://{platform.host}/api/rivet"
+  }
+}
+```
+
+- `layout`: `worktree` (instances keyed by branch) or `single` (the
+  project itself is the one instance, no branch).
+- `repos`: repo key → main-repo path, used to locate each service's
+  worktree when local.
+- `services`: per-service `repo`/`package`/`script` (for `pnpm --filter`),
+  default `mode` (`local`/`remote`, overridable per `up` invocation), and
+  `remote` upstream URL (required when the mode is or can become `remote`).
+- `env`: a map of `ENV_NAME → template` injected into every local
+  process, so a service addresses its siblings by stable domain without
+  caring whether a sibling is local or remote (this is the local/remote
+  transparency guarantee). Templates support two placeholders:
+  - `{service}` → the sibling's full local URL, e.g.
+    `VITE_SIMPLX_CORE_URL: "{core}"` resolves to
+    `http://orders-refactor-core.simplx.localhost`.
+  - `{service.host}` → host[:port] only, no scheme — for path suffixes
+    (`VITE_API_URL: "{platform}/api/v1"`) or alternate schemes
+    (`VITE_MAINFRAME_URL: "ws://{platform.host}/api/rivet"`).
+
+### Caddy prerequisite
+
+The orchestrator relies on [Caddy](https://caddyserver.com/) as the shared
+reverse proxy. One-time setup:
+
+- Install `caddy` and make sure it's on `PATH`.
+- Nothing else to configure — `devdash up` auto-starts Caddy detached
+  (admin API on `:2019`) the first time it's needed, and reuses the same
+  running instance for subsequent instances.
+- Caddy binds the standard HTTP port `:80` (clean URLs, no `:port`
+  suffix). On macOS this is normally permitted for the user; on Linux you
+  may need to grant the binary the capability once:
+  `sudo setcap cap_net_bind_service=+ep $(which caddy)`. If the bind
+  fails, `up` reports a clear error and does not report the instance as
+  up — it does not silently fall back to another port.
+
+### Config directory migration
+
+Prior versions stored everything under `~/.config/local-dev/`. This is
+migrated automatically and transparently to `~/.config/devdash/` (config,
+`sessions/`, `logs/`) the first time any devdash command runs after
+upgrading — no manual steps, and already-running processes stay
+reconnectable.
 
 ## Development
 

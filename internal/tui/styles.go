@@ -102,6 +102,11 @@ var (
 var dimStyle = lipgloss.NewStyle().
 	Foreground(colorGray)
 
+// Group header style (instance-grouping headers in the session list, FR-032)
+var groupHeaderStyle = lipgloss.NewStyle().
+	Foreground(colorBlue).
+	Bold(true)
+
 // Port style
 var portStyle = lipgloss.NewStyle().
 	Foreground(colorYellow)
