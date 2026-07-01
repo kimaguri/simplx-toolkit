@@ -16,3 +16,8 @@ CLAUDE.md
 **/CLAUDE.md
 .serena/
 .worktrees/
+
+# OS / tooling junk
+.DS_Store
+**/.DS_Store
+/graphify-out/

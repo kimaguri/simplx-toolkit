@@ -12,8 +12,17 @@ type LocalConfig struct {
 	PortOverrides map[string]int `json:"port_overrides,omitempty"`
 }
 
-// configDir returns the config directory path: ~/.config/local-dev/
+// configDir returns the config directory path: ~/.config/devdash/
 func configDir() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ".devdash"
+	}
+	return filepath.Join(home, ".config", "devdash")
+}
+
+// legacyConfigDir returns the pre-migration config directory path: ~/.config/local-dev/
+func legacyConfigDir() string {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return ".local-dev"
@@ -36,9 +45,61 @@ func LogsDir() string {
 	return filepath.Join(configDir(), "logs")
 }
 
+// ProjectsDir returns the central project-config store: <config>/projects/
+func ProjectsDir() string { return filepath.Join(configDir(), "projects") }
+
+// InstancesDir returns the instance registry dir: <config>/instances/
+func InstancesDir() string { return filepath.Join(configDir(), "instances") }
+
 // configPath returns the config file path
 func configPath() string {
 	return filepath.Join(configDir(), "config.json")
+}
+
+// MigrateFromLegacy moves config.json, sessions/, and logs/ from the legacy
+// ~/.config/local-dev directory to the new ~/.config/devdash directory.
+// It is idempotent: a no-op if the new dir already exists or the legacy dir
+// is absent. Must run before any SessionsDir()/reconnect use so already
+// running processes stay reconnectable (their session files reference paths).
+func MigrateFromLegacy() error {
+	newDir := configDir()
+	legacyDir := legacyConfigDir()
+
+	if _, err := os.Stat(newDir); err == nil {
+		// New dir already exists; nothing to do.
+		return nil
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+
+	if _, err := os.Stat(legacyDir); err != nil {
+		if os.IsNotExist(err) {
+			// Legacy dir absent; nothing to migrate.
+			return nil
+		}
+		return err
+	}
+
+	if err := os.MkdirAll(newDir, 0o755); err != nil {
+		return err
+	}
+
+	entries := []string{"config.json", "sessions", "logs"}
+	for _, name := range entries {
+		src := filepath.Join(legacyDir, name)
+		if _, err := os.Stat(src); err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return err
+		}
+		dst := filepath.Join(newDir, name)
+		if err := os.Rename(src, dst); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 // LoadConfig loads configuration from disk. Returns empty config if file doesn't exist.

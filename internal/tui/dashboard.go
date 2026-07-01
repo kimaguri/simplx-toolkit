@@ -58,8 +58,15 @@ func (m dashboardModel) Init() tea.Cmd {
 
 // SetProcesses updates the process list
 func (m *dashboardModel) SetProcesses(procs []*devdash.RunningProcess) {
-	// Sort by name for stable ordering
+	// Sort by instance, then name, so same-instance sessions are contiguous
+	// for grouping in renderSessionList (FR-032). Sessions with no known
+	// instance (the common case today — see sessionInstance) sort together
+	// under "(ungrouped)".
 	sort.Slice(procs, func(i, j int) bool {
+		ii, ji := sessionInstance(procs[i]), sessionInstance(procs[j])
+		if ii != ji {
+			return ii < ji
+		}
 		return procs[i].Info.Name < procs[j].Info.Name
 	})
 	m.processes = procs
@@ -459,7 +466,45 @@ func (m dashboardModel) View() string {
 	return lipgloss.JoinVertical(lipgloss.Left, body, help)
 }
 
-// renderSessionList renders the left panel with session list
+// sessionInstance returns the orchestrator instance slug rp's session
+// belongs to, or "" if unknown. devdash.SessionInfo now carries the same
+// Instance field internal/process.SessionInfo does (T044); since `up`
+// (internal/orchestrator) and the TUI's ProcessManager both read/write
+// config.SessionsDir(), a session tagged by `up` is visible here with its
+// real Instance value once the TUI reconnects/reloads.
+func sessionInstance(rp *devdash.RunningProcess) string {
+	if rp == nil {
+		return ""
+	}
+	return rp.Info.Instance
+}
+
+// sessionService returns the orchestrator service key rp's session backs,
+// or "" if unknown. See sessionInstance for the field's provenance.
+func sessionService(rp *devdash.RunningProcess) string {
+	if rp == nil {
+		return ""
+	}
+	return rp.Info.Service
+}
+
+// ungroupedHeader is the fallback group header for sessions with no known
+// instance (legacy/ungrouped), per FR-032.
+const ungroupedHeader = "(ungrouped)"
+
+// groupHeaderFor returns the display header for rp's group: its instance
+// slug if known, otherwise ungroupedHeader.
+func groupHeaderFor(rp *devdash.RunningProcess) string {
+	if inst := sessionInstance(rp); inst != "" {
+		return inst
+	}
+	return ungroupedHeader
+}
+
+// renderSessionList renders the left panel with session list, grouped
+// under instance headers (FR-032). Sessions with no known instance are
+// grouped under a single "(ungrouped)" header so existing flat behavior is
+// preserved when instance information is unavailable.
 func (m dashboardModel) renderSessionList(w, h int) string {
 	innerW := w - 2
 	if innerW < 1 {
@@ -478,7 +523,13 @@ func (m dashboardModel) renderSessionList(w, h int) string {
 		lines = append(lines, "")
 		lines = append(lines, dimStyle.Render("Press n to launch"))
 	} else {
+		lastHeader := ""
 		for i, rp := range m.processes {
+			header := groupHeaderFor(rp)
+			if header != lastHeader {
+				lines = append(lines, groupHeaderStyle.Render(header))
+				lastHeader = header
+			}
 			item := m.renderSessionItem(i, rp, innerW)
 			// Item may contain multiple lines (e.g. tunnel info)
 			for _, l := range strings.Split(item, "\n") {

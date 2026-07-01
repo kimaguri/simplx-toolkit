@@ -20,6 +20,19 @@ type SessionInfo struct {
 	WtName    string   `json:"wt_name"`
 	WtPath    string   `json:"wt_path"`
 	StartedAt int64    `json:"started_at"`
+	// Instance is the orchestrator instance slug this session belongs to
+	// (e.g. "orders-refactor"). Optional: empty for sessions not launched
+	// via the orchestrator (legacy/ungrouped), and absent entirely from
+	// session files written before this field existed — omitempty keeps
+	// those files parseable (backward-compatible, FR-032). Mirrors
+	// process.SessionInfo.Instance (T032); both packages read/write the
+	// same session directory (config.SessionsDir()), so a session tagged by
+	// the orchestrator's `up` (internal/process) is loaded here with the
+	// same value (T044).
+	Instance string `json:"instance,omitempty"`
+	// Service is the orchestrator service key this session backs (e.g.
+	// "front"). Optional, same back-compat rules as Instance.
+	Service string `json:"service,omitempty"`
 }
 
 // sessionFilePath returns the full path for a session JSON file
