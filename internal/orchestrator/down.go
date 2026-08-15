@@ -41,6 +41,10 @@ func Down(slug string, proxyClient proxy.ProxyClient, pm *process.ProcessManager
 				stopErrs = append(stopErrs, fmt.Errorf("stopping service %q (%s): %w", svc.Service, svc.SessionName, err))
 			}
 		}
+		// pm.Stop only kills the tmux session when this pm attached to it
+		// (rp.tmux != nil). The headless `down` CLI builds a fresh pm without
+		// Reconnect, so reap the session on the maomao socket directly.
+		process.KillTmuxSessionByName(svc.SessionName)
 	}
 	if len(stopErrs) > 0 {
 		return true, errors.Join(stopErrs...)
