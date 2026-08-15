@@ -58,7 +58,7 @@ func resolveTemplate(template string, hostByService map[string]string) (string, 
 		if isHost {
 			b.WriteString(host)
 		} else {
-			b.WriteString("http://" + host)
+			b.WriteString("https://" + host)
 		}
 
 		i = end + 1

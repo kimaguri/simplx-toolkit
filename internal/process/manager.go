@@ -141,6 +141,7 @@ func (pm *ProcessManager) Start(info SessionInfo) (*RunningProcess, error) {
 					info.Command, info.Args, info.WorkDir, info.ExtraEnv, logPath, logBuf)
 				if err == nil {
 					info.StartedAt = time.Now().Unix()
+					info.PID = ts.PanePID()
 					if err := SaveSession(pm.sessionsDir, info); err != nil {
 						_, _ = fmt.Fprintf(os.Stderr, "warning: failed to save session %q: %v\n", info.Name, err)
 					}
