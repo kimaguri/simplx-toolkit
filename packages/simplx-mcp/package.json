@@ -1,0 +1,41 @@
+{
+  "name": "@simplx/simplx-mcp",
+  "version": "0.1.0",
+  "description": "MCP server exposing SimplX tenant UI metadata operations to AI agents. Thin wrapper over the SimplX platform REST API — no state, no application logic.",
+  "type": "module",
+  "license": "UNLICENSED",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "bin": {
+    "simplx-mcp": "./bin/simplx-mcp.js"
+  },
+  "files": [
+    "dist",
+    "bin",
+    "scripts"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "node scripts/embed-knowledge.mjs && tsc -p tsconfig.build.json",
+    "prepack": "pnpm run build",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "^26.4.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.11"
+  }
+}

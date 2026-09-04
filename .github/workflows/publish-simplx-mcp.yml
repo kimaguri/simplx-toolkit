@@ -1,0 +1,63 @@
+name: Publish simplx-mcp (manual)
+
+# LAB-257 T147 — DRAFT, deliberately inert. Does NOT run on push or tag; the
+# only trigger is a manual dispatch that also requires typing a literal
+# confirmation string, and even then `pnpm publish` has no real credential
+# to authenticate with (see the two placeholders below) until someone
+# completes the two decisions recorded in docs/simplx-mcp-publishing.md:
+# which registry/namespace to publish under, and whether this package
+# should be public at all given what it documents about the platform's
+# meta-editing auth surface. This file exists so the release step itself
+# does not have to be designed from scratch once those decisions land —
+# it is not an invitation to fill in the placeholders without reading that
+# document first.
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type "publish" to confirm — this pushes a real package version'
+        required: true
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    if: github.event.inputs.confirm == 'publish'
+    defaults:
+      run:
+        working-directory: packages/simplx-mcp
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          # DECISION (docs/simplx-mcp-publishing.md, "Decision 1"): must
+          # match whichever registry the owner picks — public npm
+          # ("https://registry.npmjs.org") or GitHub Packages
+          # ("https://npm.pkg.github.com"), scoped to this repo's own
+          # GitHub owner. Left as an obviously-fake placeholder rather
+          # than a real registry URL so this workflow cannot accidentally
+          # publish to the wrong place if ever run before that decision.
+          registry-url: "REGISTRY_URL_PLACEHOLDER"
+
+      - uses: pnpm/action-setup@v4
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm run build
+
+      # Verifies the package is what T147 checked it to be before
+      # publishing anything — `pnpm pack` runs `prepack` (the build) again
+      # and produces the exact tarball `pnpm publish` would push.
+      - run: pnpm pack
+
+      - run: pnpm publish --no-git-checks
+        env:
+          # NAMED PLACEHOLDER, not a real secret — this name does not exist
+          # in this repo's Actions secrets today, so this step fails closed
+          # if run as-is. Whoever sets this workflow up for real creates
+          # the actual token (an npm access token for public npm, or a
+          # GitHub PAT with `write:packages` for GitHub Packages) and adds
+          # it under this exact name.
+          NODE_AUTH_TOKEN: ${{ secrets.SIMPLX_MCP_PUBLISH_TOKEN }}
