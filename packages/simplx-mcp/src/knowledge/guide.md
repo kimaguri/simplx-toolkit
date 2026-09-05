@@ -102,7 +102,11 @@ Every write, delete and rollback records who (human id or `agent:mcp`), when, fr
 
 ## Environments
 
-The `test` profile has read and write tools; the `prod` profile has read tools only — production changes come from a human promoting test to prod. `meta.inventory` scans every active row of every tenant against the rules; read `tenantViolationCount`.
+The `test` profile has read and write tools; the `prod` profile has read tools only — production changes come from promoting test to prod, either by a human in the admin UI or, on the test profile, via `meta.promote_preview` / `meta.promote`. `meta.inventory` scans every active row of every tenant against the rules; read `tenantViolationCount`.
+
+## Promotion (test profile only)
+
+`meta.promote_preview` then `meta.promote` move one app, one entity, or one template from test to prod (`target`, default `"prod"`) — never available on the prod profile, and only on the tenant owner's explicit instruction. Address by `tenantSlug` (not the tenant id other tools use) and `app`; add `entity` or `templateKey` to promote just that object, or neither for the whole app. Preview first: read `diff`, and when promoting a template confirm `templateStale` is `false` (`true` means the template itself needs promoting first — before any entity `basedOn` it). Then call `meta.promote` with `expectedTargetVersion` set to the preview's `targetVersion` exactly, `null` included; a `version_conflict` means the target moved since the preview — re-preview, never retry blindly. Promoting a template also requires `acknowledgedDependents`, the count from `meta.template_dependents`, the same obligation `meta.write_template` carries.
 
 ## Common mistakes
 

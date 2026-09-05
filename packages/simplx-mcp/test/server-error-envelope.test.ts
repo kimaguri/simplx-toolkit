@@ -63,6 +63,35 @@ describe("platform error envelope through MCP (LAB-257 T254)", () => {
     });
   });
 
+  it("forwards a promotion version_conflict (LAB-272 T063) with details.params.currentVersion intact, not swallowed or reshaped", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({
+            code: "failed_precondition",
+            message: "Target moved since preview",
+            details: { app_code: "version_conflict", params: { currentVersion: 6, expectedTargetVersion: 3 } },
+          }),
+          { status: 412, statusText: "Precondition Failed", headers: { "content-type": "application/json" } },
+        ),
+      ),
+    );
+    const client = await connect();
+    const result = await client.callTool({
+      name: "meta.promote",
+      arguments: { tenantSlug: "acme", app: "intellhouse", entity: "contacts", expectedTargetVersion: 3 },
+    });
+    expect(result.isError).toBe(true);
+    const text = (result.content as Array<{ type: string; text?: string }>).map((c) => c.text ?? "").join("");
+    const body = JSON.parse(text);
+    expect(body).toMatchObject({
+      code: "failed_precondition",
+      status: 412,
+      details: { app_code: "version_conflict", params: { currentVersion: 6 } },
+    });
+  });
+
   it("still returns a successful tool result untouched", async () => {
     vi.stubGlobal(
       "fetch",

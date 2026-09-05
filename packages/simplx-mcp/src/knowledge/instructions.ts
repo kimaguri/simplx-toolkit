@@ -36,4 +36,6 @@ WHAT CHANGES WHAT ON SCREEN:
 
 NEVER: write without expectedVersion on an existing entity; write to production (the prod profile has no write tools and the platform refuses the automatic author there); flatten a basedOn entity into a full copy to "fix" an override; mutate a tenant other than the one asked for.
 
+PROMOTION (test profile only): meta.promote_preview and meta.promote move an app, one entity, or one template from test to prod — never available on the prod profile. Cycle: meta.promote_preview -> read diff and confirm templateStale is false (true means the template itself is stale on the target and must be promoted first, before an entity basedOn it) -> meta.promote with expectedTargetVersion = the preview's targetVersion, null included. A version_conflict answer means the target moved since your preview: re-preview, never retry blindly. Promoting a template requires acknowledgedDependents, the count from meta.template_dependents, exactly like meta.write_template. These tools address the tenant by tenantSlug, not the tenant id every other meta.* tool uses. Only promote on the tenant owner's explicit instruction.
+
 Tenant ids come from meta.list_apps / the operator; app name is usually the tenant's slug. Prefer changeReason on every write — it is what humans read in history.`;

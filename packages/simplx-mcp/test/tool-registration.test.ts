@@ -9,6 +9,7 @@ import * as appTools from "../src/tools/meta/app.js";
 import * as templateTools from "../src/tools/meta/templates.js";
 import * as historyTools from "../src/tools/meta/history.js";
 import * as inventoryTools from "../src/tools/meta/inventory.js";
+import * as promoteTools from "../src/tools/meta/promote.js";
 
 /**
  * LAB-257 T162 — every write tool must register through `registerWriteTool`,
@@ -82,6 +83,7 @@ const ALL_MODULES: Record<string, Record<string, unknown>> = {
   "templates.ts": templateTools,
   "history.ts": historyTools,
   "inventory.ts": inventoryTools,
+  "promote.ts": promoteTools,
 };
 
 describe("every write tool registers through registerWriteTool, every other tool through registerReadTool — LAB-257 T162", () => {
@@ -94,7 +96,7 @@ describe("every write tool registers through registerWriteTool, every other tool
     );
     // Sanity floor — if module resolution silently found nothing, every
     // assertion below would vacuously pass.
-    expect(allTools.length).toBeGreaterThanOrEqual(13);
+    expect(allTools.length).toBeGreaterThanOrEqual(18);
 
     for (const { file, tool } of allTools) {
       const actualProvenance = provenanceByName.get(tool.name);
