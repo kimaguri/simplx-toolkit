@@ -70,6 +70,69 @@ Conditions: `dependencies: ["type"]` + `conditions: { hidden: { field: "type", n
 
 Defaults: `preDefault: { type: "parentId" | "currentDate" | "userId" | "employeeId" | "staticValue" (value) | "configParameter" (value) | "record" (targetField) | "select" (by, equals, operator?) }`.
 
+## Зависимые поля: три механизма
+
+Три разных инструмента, не взаимозаменяемые — не путать их между собой.
+
+1. **`dependsOn`** — каскад для `select`/`dictionary`: сужает варианты дочернего поля по значению родительского (пример: `city` зависит от `country`). Работает только на выбор опций, не трогает `hidden`/`required`/`label`.
+2. **`dependencies` + `conditions`** — реактивное поведение поля от значений других полей формы: `hidden`, `required`, `disabled`, `label`, `fieldProps` меняются по условию (`Condition`: `equals`, `notEquals`, `in`, `and`, `or`, `not`, ...). `dependencies: ["type"]` регистрирует, какие поля форма должна отслеживать — без него условие не пересчитается при изменении driving-поля.
+3. **`ValueSource`** — новый источник значения `{ valueFrom, dict?, pick? }`. Принимается только в `conditions.label` и как значение первого уровня `conditions.fieldProps.*` (т.е. один ключ `fieldProps` может быть объектом `{ valueFrom, ... }`; вложенные объекты внутри значения не проверяются и ValueSource'ом не считаются). **Не** принимается в `conditions.title`, в `then`/`default` условного значения, в `cases[].then`. Причина: платформа валидирует Ajv по сгенерированной JSON Schema (бюджет 500 КБ, `$refStrategy: none`) — правила структурные, расширять их на каждое поле было бы слишком дорого. Колоночный `format` (таблицы) — отдельный DSL, который уже принимал `valueFrom` как строку (в т.ч. `parent.currency`) и это не меняется.
+
+```ts
+/** Значение свойства берётся из другого поля той же формы (или строки таблицы). */
+interface ValueSource {
+  /** Имя поля; путь через точку для подгруженных связей (`_client.full_name`);
+   *  префикс `parent.` — поле родительской записи вложенной таблицы. Непустая строка. */
+  valueFrom: string
+  /** Имя словаря (`_s_dictionary.dictionary_name`), через который прогнать значение. */
+  dict?: string
+  /** Атрибут элемента словаря (`symbol`, `label`, `short`…). Только вместе с `dict`. */
+  pick?: string
+}
+```
+
+**Где резолвятся пути через точку.** Для строк таблицы (`foreignTables`) и колонок (`format`) доступны и подгруженные связи (`_client.full_name`), и `parent.<field>` — поле родительской записи вложенной секции. **В значениях формы** связи недоступны — только имена полей самой формы и `parent.*` (родительская запись передаётся модалке вложенной секции). Источник, который не резолвится (поле не найдено), даёт `undefined` — свойство просто не выставляется, ошибок нет.
+
+Примеры (полный контракт — `meta-contract.md`):
+
+```ts
+// Сумма договора — валюта из соседнего поля формы
+{ dataIndex: 'amount', valueType: 'money',
+  dependencies: ['currency'],
+  conditions: { fieldProps: { currency: { valueFrom: 'currency' } } } }
+
+// Цена позиции в спецификации — валюта берётся у родительского договора
+// (поля currency в форме позиции нет — доступ только через parent.)
+{ dataIndex: 'unit_price', valueType: 'money',
+  conditions: { fieldProps: { currency: { valueFrom: 'parent.currency' } } } }
+
+// Колонка вложенной таблицы (спецификации) — символ валюты из родителя, через словарь
+{ dataIndex: 'line_total', valueType: 'money',
+  format: [{ valueFrom: 'line_total', as: 'number', digits: 2 }, ' ',
+           { valueFrom: 'parent.currency', dict: 'currency', pick: 'symbol' }] }
+
+// Подпись с единицей измерения — dict + pick без parent.
+{ dataIndex: 'quantity', valueType: 'number',
+  dependencies: ['unit'],
+  conditions: { label: { valueFrom: 'unit', dict: 'units', pick: 'short' } } }
+```
+
+## Денежное поле (`valueType: 'money'`)
+
+Форма:
+
+```ts
+fieldProps: {
+  currency?: string | ValueSource   // код ISO; константа или источник (в т.ч. parent.)
+  precision?: number                // по умолчанию 2
+  min?: number
+}
+```
+
+Таблица без `format`: `fieldProps.currencyField?: string` — имя колонки строки, где лежит код валюты. Если задан `format`, он имеет приоритет над `currency`/`currencyField`.
+
+Порядок выбора валюты: явная (`currency` / `currencyField`) → валюта организации по умолчанию (`_s_settings general/currency`) → без символа, просто число. Символ валюты — атрибут `symbol` элемента словаря `currency` по коду; захардкоженного символа нет нигде.
+
 ## Detail sections (ISectionMeta, short)
 
 `type` (see types resource), `title`, `area` (`left|center|right|top|bottom`), tables: `resource`, `appResource`, `tableColumns`, `modalFields`, `foreignTables`, `initialFilter`, `initialSorter`, `pageSize`; detail panels: `groups: [{ id, fields: { "$ref": ... } }]`, `editMode`; tabs container: `type: "tabs"`, `items: [...]`; custom: `type: "custom"`, `componentName`.

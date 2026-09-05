@@ -212,6 +212,22 @@ maxLength, minLength
 multiple
 ```
 
+### `money` — fieldProps (LAB-273)
+
+Форма (`valueType: 'money'`):
+
+```ts
+fieldProps: {
+  currency?: string | ValueSource   // код ISO; константа или источник (в т.ч. parent.<field>)
+  precision?: number                // default 2
+  min?: number
+}
+```
+
+Таблица (`valueType: 'money'`, без `format`): `fieldProps.currencyField?: string` — колонка строки с кодом валюты. Заданный `format` имеет приоритет над `currency`/`currencyField`.
+
+Порядок выбора валюты: явная (`currency`/`currencyField`) → валюта организации по умолчанию (`_s_settings general/currency`) → без символа (число). Символ — `symbol` элемента словаря `currency` по коду; захардкоженного символа нет.
+
 ---
 
 ## ValueType
@@ -419,17 +435,54 @@ interface ConditionalValueConfig<T> {
   then: T
 }
 
+/** LAB-273 (структурные правила сужены задачей T008a — платформа валидирует
+ * Ajv по сгенерированной JSON Schema, бюджет 500 КБ, `$refStrategy: none`,
+ * поэтому вместо «везде, где допустим ConditionalValue» — точечный список
+ * мест). Объект с ключом `valueFrom` трактуется как ValueSource ТОЛЬКО в
+ * `conditions.label` и как значение первого уровня `conditions.fieldProps`
+ * (один ключ fieldProps может быть ValueSource; объекты, вложенные глубже,
+ * не проверяются и ValueSource не считаются). НЕ принимается в
+ * `conditions.title`, в `then`/`default` ConditionalValueConfig, ни в
+ * `cases[].then` MultiConditionalValue. Колоночный `format` (таблицы) —
+ * отдельный DSL, уже принимавший `valueFrom` как строку (в т.ч.
+ * `parent.currency`) до этой задачи; это не тот же ValueSource. */
+interface ValueSource {
+  /** Имя поля; путь через точку для подгруженных связей (`_client.full_name`,
+   *  только там, где связь уже подгружена — строки таблиц/`foreignTables`);
+   *  префикс `parent.` — поле родительской записи вложенной секции (работает
+   *  и в значениях формы, и в `format` колонок). min(1). */
+  valueFrom: string
+  /** Имя словаря (`_s_dictionary.dictionary_name`), через который прогнать значение. */
+  dict?: string
+  /** Атрибут элемента словаря (`symbol`, `label`, `short`…). Требует `dict`
+   *  (иначе ошибка валидации `pick_requires_dict`). */
+  pick?: string
+}
+
 type ConditionalValue<T> = T | ConditionalValueConfig<T>
 
 interface FieldConditions {
   hidden?: boolean | Condition
-  label?: ConditionalValue<string>
+  label?: ConditionalValue<string> | ValueSource
   title?: ConditionalValue<string>
   required?: boolean | Condition
   disabled?: boolean | Condition
   readOnly?: boolean | Condition
-  fieldProps?: ConditionalValue<Record<string, unknown>>
+  fieldProps?: ConditionalValue<Record<string, unknown | ValueSource>>   // ValueSource допустим только на первом уровне значений объекта
 }
+```
+
+`ValueSource` резолвится в `lib/conditions/value-source.ts`: значение поля → если задан `dict`, найти элемент словаря по `value === code` и вернуть `pick` (или `label`, если `pick` не задан) → иначе вернуть сырое значение. Источник не найден (поле отсутствует/не резолвится) → `undefined`, свойство не выставляется, ошибок нет (в dev — `console.warn`). В значениях **формы** доступны только поля самой формы и `parent.<field>` — связи там не подгружены; в **таблицах** (`foreignTables`, `format` колонок) доступны и подгруженные связи, и `parent.`.
+
+Пример (`money` с валютой соседнего поля и с валютой родителя):
+
+```ts
+{ dataIndex: 'amount', valueType: 'money',
+  dependencies: ['currency'],
+  conditions: { fieldProps: { currency: { valueFrom: 'currency' } } } }
+
+{ dataIndex: 'unit_price', valueType: 'money',
+  conditions: { fieldProps: { currency: { valueFrom: 'parent.currency' } } } }
 ```
 
 Применение в FieldConfig:
