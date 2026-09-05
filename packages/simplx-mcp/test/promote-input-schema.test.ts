@@ -10,14 +10,21 @@ import { promotePreviewTool, promoteTool } from "../src/tools/meta/promote.js";
 /**
  * LAB-272 T063 — contract tests for `meta.promote_preview` / `meta.promote`.
  *
+ * The address rule under test (confirmed against the platform's own
+ * `resolveAddress`, LAB-272 T062): exactly THREE mutually exclusive
+ * shapes — `{ tenantSlug, app, entity? }` (app or entity address) or
+ * `{ templateKey }` alone (template address, cross-tenant — tenantSlug/app/
+ * entity MUST be absent). There is no `acknowledgedDependents` field on
+ * `meta.promote` — the platform recounts a template's dependents on the
+ * TARGET itself as part of the promote call.
+ *
  * Two layers, matching the conventions already used for the other write
  * tools in this package:
  *  - JSON Schema level (`test/write-input-schema.test.ts`'s pattern): what
  *    the calling agent sees at `tools/list`, through a real MCP client.
  *  - Handler level (`test/write.test.ts`'s pattern): the runtime checks a
- *    Zod-optional field alone cannot express (exactly-one-of
- *    entity/templateKey; acknowledgedDependents required for templateKey),
- *    against a hand-rolled `PlatformClient` double — no network involved.
+ *    Zod-optional field alone cannot express, against a hand-rolled
+ *    `PlatformClient` double — no network involved.
  */
 
 const CONNECTION = { baseUrl: "https://platform.example.test", tenantSlug: "acme", bearerToken: "token" };
@@ -72,36 +79,39 @@ describe("meta.promote_preview / meta.promote JSON Schema — LAB-272 T063", () 
     }
   });
 
-  it("meta.promote_preview's JSON Schema requires tenantSlug and app, but not entity/templateKey/target", async () => {
+  it("neither tool's JSON Schema hard-requires tenantSlug/app at the schema level (the three-shapes rule is conditional, checked at runtime — a template address legitimately omits both)", async () => {
     const client = await connectClient();
     try {
       const { tools } = await client.listTools();
-      const tool = findTool(tools, "meta.promote_preview");
-      const schema = tool.inputSchema as { required?: readonly string[] };
-      expect(schema.required ?? []).toEqual(expect.arrayContaining(["tenantSlug", "app"]));
-      expect(schema.required ?? []).not.toContain("entity");
-      expect(schema.required ?? []).not.toContain("templateKey");
-      expect(schema.required ?? []).not.toContain("target");
+      for (const name of ["meta.promote_preview", "meta.promote"]) {
+        const tool = findTool(tools, name);
+        const schema = tool.inputSchema as { required?: readonly string[] };
+        expect(schema.required ?? []).not.toContain("tenantSlug");
+        expect(schema.required ?? []).not.toContain("app");
+        expect(schema.required ?? []).not.toContain("entity");
+        expect(schema.required ?? []).not.toContain("templateKey");
+        expect(schema.required ?? []).not.toContain("target");
+      }
     } finally {
       await client.close();
     }
   });
 
-  it("meta.promote's acknowledgedDependents stays optional at the schema level (only conditionally required, checked at runtime)", async () => {
+  it("meta.promote has no acknowledgedDependents field at all — the platform recounts template dependents on the target itself", async () => {
     const client = await connectClient();
     try {
       const { tools } = await client.listTools();
       const tool = findTool(tools, "meta.promote");
-      const schema = tool.inputSchema as { required?: readonly string[] };
-      expect(schema.required ?? []).not.toContain("acknowledgedDependents");
+      const schema = tool.inputSchema as { properties?: Record<string, unknown> };
+      expect(schema.properties ?? {}).not.toHaveProperty("acknowledgedDependents");
     } finally {
       await client.close();
     }
   });
 });
 
-describe("meta.promote_preview / meta.promote — exactly one of entity/templateKey (LAB-272 T063)", () => {
-  it("meta.promote_preview rejects a call giving BOTH entity and templateKey", async () => {
+describe("meta.promote_preview / meta.promote — the three mutually exclusive address shapes (LAB-272 T063)", () => {
+  it("meta.promote_preview rejects templateKey mixed with tenantSlug/app/entity", async () => {
     const client = makeFakeClient({});
     await expect(
       promotePreviewTool.handler(makeContext(client), {
@@ -110,25 +120,38 @@ describe("meta.promote_preview / meta.promote — exactly one of entity/template
         entity: "contacts",
         templateKey: "base-crm",
       }),
-    ).rejects.toThrow(/at most one of entity/i);
+    ).rejects.toThrow(/mutually exclusive/i);
     expect(client.write).not.toHaveBeenCalled();
   });
 
-  it("meta.promote rejects a call giving BOTH entity and templateKey", async () => {
+  it("meta.promote rejects templateKey mixed with tenantSlug alone (no entity/app needed to trip the rule)", async () => {
     const client = makeFakeClient({});
     await expect(
       promoteTool.handler(makeContext(client), {
         tenantSlug: "acme",
-        app: "intellhouse",
-        entity: "contacts",
         templateKey: "base-crm",
         expectedTargetVersion: 3,
       }),
-    ).rejects.toThrow(/at most one of entity/i);
+    ).rejects.toThrow(/mutually exclusive/i);
     expect(client.write).not.toHaveBeenCalled();
   });
 
-  it("meta.promote_preview accepts neither entity nor templateKey (whole-app promotion)", async () => {
+  it("rejects an address giving neither tenantSlug/app nor templateKey", async () => {
+    const client = makeFakeClient({});
+    await expect(
+      promotePreviewTool.handler(makeContext(client), {}),
+    ).rejects.toThrow(/tenantSlug and app are both required/i);
+    expect(client.write).not.toHaveBeenCalled();
+  });
+
+  it("rejects tenantSlug given without app", async () => {
+    const client = makeFakeClient({});
+    await expect(
+      promotePreviewTool.handler(makeContext(client), { tenantSlug: "acme" }),
+    ).rejects.toThrow(/tenantSlug and app are both required/i);
+  });
+
+  it("meta.promote_preview accepts tenantSlug+app with no entity (whole-app address) — body carries no entityName/templateKey", async () => {
     const client = makeFakeClient({
       "/api/v1/meta/promote/preview": (body) => {
         expect(body).toMatchObject({ target: "prod", tenantSlug: "acme", appName: "intellhouse" });
@@ -143,32 +166,29 @@ describe("meta.promote_preview / meta.promote — exactly one of entity/template
     });
     expect(result).toMatchObject({ targetVersion: 4, templateStale: false });
   });
+
+  it("meta.promote_preview accepts templateKey alone — body carries ONLY target/templateKey, no tenantSlug/appName at all", async () => {
+    const client = makeFakeClient({
+      "/api/v1/meta/promote/preview": (body) => {
+        expect(body).toEqual({ target: "prod", templateKey: "base-crm" });
+        return { source: {}, target: null, targetVersion: null, templateStale: false, diff: [] };
+      },
+    });
+    const result = await promotePreviewTool.handler(makeContext(client), { templateKey: "base-crm" });
+    expect(result).toMatchObject({ target: null, targetVersion: null });
+  });
 });
 
-describe("meta.promote — acknowledgedDependents required when templateKey is given (LAB-272 T063)", () => {
-  it("rejects a templateKey call without acknowledgedDependents", async () => {
-    const client = makeFakeClient({});
-    await expect(
-      promoteTool.handler(makeContext(client), {
-        tenantSlug: "acme",
-        app: "intellhouse",
-        templateKey: "base-crm",
-        expectedTargetVersion: 2,
-      }),
-    ).rejects.toThrow(/acknowledgedDependents/);
-    expect(client.write).not.toHaveBeenCalled();
-  });
-
-  it("succeeds a templateKey call WITH acknowledgedDependents, forwarding it verbatim alongside expectedTargetVersion (null included) and changeSource: mcp", async () => {
+describe("meta.promote — request/response shapes (LAB-272 T063)", () => {
+  it("forwards expectedTargetVersion verbatim, null included, alongside changeSource: mcp, for an entity address", async () => {
     const client = makeFakeClient({
       "/api/v1/meta/promote": (body) => {
-        expect(body).toMatchObject({
+        expect(body).toEqual({
           target: "prod",
           tenantSlug: "acme",
           appName: "intellhouse",
-          templateKey: "base-crm",
+          entityName: "contacts",
           expectedTargetVersion: null,
-          acknowledgedDependents: 5,
           changeSource: "mcp",
         });
         return { targetVersion: 1, unknownComponents: [], actor: "agent:mcp" };
@@ -177,26 +197,44 @@ describe("meta.promote — acknowledgedDependents required when templateKey is g
     const result = await promoteTool.handler(makeContext(client), {
       tenantSlug: "acme",
       app: "intellhouse",
-      templateKey: "base-crm",
+      entity: "contacts",
       expectedTargetVersion: null,
-      acknowledgedDependents: 5,
     });
     expect(result).toEqual({ targetVersion: 1, unknownComponents: [], actor: "agent:mcp" });
   });
 
-  it("does not require acknowledgedDependents for an entity promotion", async () => {
+  it("promotes a template by templateKey alone, no tenantSlug/appName in the body, and never sends acknowledgedDependents", async () => {
     const client = makeFakeClient({
       "/api/v1/meta/promote": (body) => {
+        expect(body).toEqual({
+          target: "prod",
+          templateKey: "base-crm",
+          expectedTargetVersion: 2,
+          changeSource: "mcp",
+        });
         expect(body).not.toHaveProperty("acknowledgedDependents");
-        return { targetVersion: 8, unknownComponents: [], actor: "agent:mcp" };
+        return { targetVersion: 3, unknownComponents: [], actor: "agent:mcp" };
+      },
+    });
+    const result = await promoteTool.handler(makeContext(client), {
+      templateKey: "base-crm",
+      expectedTargetVersion: 2,
+    });
+    expect(result).toEqual({ targetVersion: 3, unknownComponents: [], actor: "agent:mcp" });
+  });
+
+  it("promotes the whole app when entity is omitted", async () => {
+    const client = makeFakeClient({
+      "/api/v1/meta/promote": (body) => {
+        expect(body).not.toHaveProperty("entityName");
+        return { targetVersion: 8, unknownComponents: [], actor: null };
       },
     });
     const result = await promoteTool.handler(makeContext(client), {
       tenantSlug: "acme",
       app: "intellhouse",
-      entity: "contacts",
       expectedTargetVersion: 7,
     });
-    expect(result).toEqual({ targetVersion: 8, unknownComponents: [], actor: "agent:mcp" });
+    expect(result).toEqual({ targetVersion: 8, unknownComponents: [], actor: null });
   });
 });
