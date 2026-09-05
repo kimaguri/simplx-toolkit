@@ -1,21 +1,10 @@
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { readConnectionFromEnv } from "./env.js";
 import { createProdProfile, createTestProfile } from "./profiles/index.js";
 import { createSimplxMcpServer } from "./server.js";
 
-const requiredEnv = (name: string): string => {
-  const value = process.env[name];
-  if (!value) {
-    throw new Error(`missing required environment variable: ${name}`);
-  }
-  return value;
-};
-
 const main = async (): Promise<void> => {
-  const connection = {
-    baseUrl: requiredEnv("SIMPLX_PLATFORM_URL"),
-    tenantSlug: requiredEnv("SIMPLX_TENANT_SLUG"),
-    bearerToken: requiredEnv("SIMPLX_BEARER_TOKEN"),
-  };
+  const connection = readConnectionFromEnv(process.env);
 
   const profileName = process.env["SIMPLX_MCP_PROFILE"] ?? "prod";
   const profile = profileName === "test" ? createTestProfile(connection) : createProdProfile(connection);

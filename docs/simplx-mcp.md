@@ -92,7 +92,7 @@ through them:
 | Variable | Required | Meaning |
 |---|---|---|
 | `SIMPLX_PLATFORM_URL` | yes | Base URL of the platform's REST API, e.g. `https://platform-test.sadmin.app` |
-| `SIMPLX_TENANT_SLUG` | yes | Which tenant this server instance talks to |
+| `SIMPLX_AUTH_TENANT_SLUG` | yes | Slug sent as the `X-Tenant-Slug` header the platform requires for service-to-service auth; any existing tenant slug works — it does NOT choose which tenant the tools read or write (tenant is a parameter of every call). Legacy name `SIMPLX_TENANT_SLUG` still accepted as an alias. |
 | `SIMPLX_BEARER_TOKEN` | yes | The credential sent as `Authorization: Bearer <token>` on every platform call |
 | `SIMPLX_MCP_PROFILE` | no (defaults to `prod`) | `test` or `prod` — see below |
 
@@ -138,7 +138,7 @@ flip:
       "args": ["--yes", "file:/absolute/path/to/simplx-simplx-mcp-0.1.0.tgz"],
       "env": {
         "SIMPLX_PLATFORM_URL": "https://platform-test.sadmin.app",
-        "SIMPLX_TENANT_SLUG": "acme",
+        "SIMPLX_AUTH_TENANT_SLUG": "acme",
         "SIMPLX_BEARER_TOKEN": "plt_test_...",
         "SIMPLX_MCP_PROFILE": "test"
       }
@@ -148,7 +148,7 @@ flip:
       "args": ["--yes", "file:/absolute/path/to/simplx-simplx-mcp-0.1.0.tgz"],
       "env": {
         "SIMPLX_PLATFORM_URL": "https://platform.sadmin.app",
-        "SIMPLX_TENANT_SLUG": "acme",
+        "SIMPLX_AUTH_TENANT_SLUG": "acme",
         "SIMPLX_BEARER_TOKEN": "plt_live_...",
         "SIMPLX_MCP_PROFILE": "prod"
       }
@@ -160,6 +160,27 @@ flip:
 An agent connected to `simplx-meta-prod` simply has no write tools to
 discover — there is nothing to configure wrong at the calling end beyond
 picking the right server entry.
+
+### Two environments — two servers; tenant is a call parameter
+
+Each `.mcp.json` entry is one server instance bound to one platform URL and
+one profile — `simplx-meta-test` (write tools included) and
+`simplx-meta-prod` (read-only, eleven tools). That binding is by platform and
+profile only, not by tenant: a single running server instance serves every
+tenant on that platform, because `tenant` is an argument passed to each call
+(`meta.list_apps`, `meta.get_entity`, and the rest), not something baked into
+the server at startup. The only reason `SIMPLX_AUTH_TENANT_SLUG` exists at
+all is to populate the `X-Tenant-Slug` auth header the platform's
+service-to-service auth requires — it is not a tenant selector, and any
+existing tenant slug works there regardless of which tenant a given call
+actually targets.
+
+Promoting meta from test to production is deliberately **not** an MCP tool —
+it is a human action taken in the admin UI, matching the write-less `prod`
+profile above. The prod server's role for an agent is verification after that
+human step: read the promoted entity or app back through
+`simplx-meta-prod`'s read tools and confirm it matches what was promoted,
+not to perform the promotion itself.
 
 ## What the server itself teaches the agent (LAB-257 T259)
 

@@ -14,6 +14,8 @@
  */
 export const SERVER_INSTRUCTIONS = `SimplX meta server (meta.*). Tenant UI metadata lives in the platform DB; a write IS publication — the screen picks it up on next load. Rules live in code (published JSON Schema), meta lives in the DB, you edit through these tools only.
 
+TENANT: this one server instance serves every tenant of its platform. \`tenant\` is a parameter you pass on EACH tool call (meta.list_apps, meta.get_entity, meta.write_entity, ...), not a property of the server. The SIMPLX_AUTH_TENANT_SLUG environment variable (legacy alias SIMPLX_TENANT_SLUG) is unrelated to which tenant you operate on — it is only the value the platform expects in the X-Tenant-Slug header for service-to-service authorization, and any valid slug works there. There is one server per environment: the test profile exposes write tools, the prod profile is read-only.
+
 READ FIRST: resource simplx://meta/guide (how meta is shaped and what each key does on screen) and simplx://meta/types (field/section/action types). meta.get_schema gives the machine-readable rules; validate against them with meta.validate, never with your own schema reading.
 
 WRITE CYCLE, always in this order:
