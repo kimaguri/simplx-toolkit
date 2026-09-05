@@ -20,6 +20,8 @@ import {
   versionsTool,
   rollbackTool,
   inventoryTool,
+  promotePreviewTool,
+  promoteTool,
 } from "./tools/meta/index.js";
 
 export interface SimplxMcpServerOptions {
@@ -94,6 +96,10 @@ const registerWithServer = (server: McpServer, context: ToolContext, tool: ToolD
  *   inventory.ts: meta.inventory (read) — T210, a full on-demand scan of
  *                 every active meta row across every tenant against the
  *                 published rules (T209's `GET /api/v1/meta/inventory`).
+ *   promote.ts:   meta.promote_preview, meta.promote (both "write" —
+ *                 LAB-272 T063) — promoting an app/entity/template from
+ *                 test to prod, test-profile only; addresses tenants by
+ *                 slug, unlike every other tool here.
  *
  * THE WRITE BOUNDARY IS STRUCTURAL, NOT A NAME CHECK. `"write" in profile`
  * narrows the `Profile` union (`ProdProfile | TestProfile`) to
@@ -169,6 +175,8 @@ export const buildToolRegistry = (profile: Profile): ToolRegistry => {
     registry.registerWriteTool(profile, writeAppTool);
     registry.registerWriteTool(profile, writeTemplateTool);
     registry.registerWriteTool(profile, rollbackTool);
+    registry.registerWriteTool(profile, promotePreviewTool);
+    registry.registerWriteTool(profile, promoteTool);
   }
 
   return registry;

@@ -72,6 +72,12 @@ const WRITE_TOOL_NAMES = [
   "meta.write_app",
   "meta.write_template",
   "meta.rollback",
+  // LAB-272 T063: promotion is test-profile-only, gated through the same
+  // registerWriteTool mechanism as every write tool above, even though
+  // meta.promote_preview itself mutates nothing — see promote.ts's header
+  // comment for why kind: "write" is the correct self-declaration here.
+  "meta.promote_preview",
+  "meta.promote",
 ];
 
 /** A representative slice of the read/inspect tools (contracts/mcp-tools.md)

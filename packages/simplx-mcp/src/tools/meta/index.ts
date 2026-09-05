@@ -30,3 +30,5 @@ export type { MetaVersionHistoryEntry, RollbackArgs, RollbackResult, VersionsArg
 export { rollbackTool, versionsTool } from "./history.js";
 export type { MetaInventoryResult, MetaInventoryValueTypeCount, MetaInventoryViolation } from "./inventory.js";
 export { inventoryTool } from "./inventory.js";
+export type { PromoteArgs, PromotePreviewArgs, PromotePreviewResult, PromoteResult } from "./promote.js";
+export { promotePreviewTool, promoteTool } from "./promote.js";

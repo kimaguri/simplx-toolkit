@@ -79,7 +79,7 @@ package's own `node_modules` in that fresh cache confirmed `zod` was present
 there directly (not resolved from any ancestor directory). With the four
 environment variables below set (see "Configure"), the same command started
 the server and it stayed alive listening on stdio with no error output — the
-full assembly (client, tool registry, all sixteen tools, `StdioServerTransport`)
+full assembly (client, tool registry, all eighteen tools, `StdioServerTransport`)
 works end to end from a cold install.
 
 ## Configure
@@ -102,14 +102,15 @@ This is the property the whole feature is built around, and it is worth
 stating plainly rather than leaving it implied: **`SIMPLX_MCP_PROFILE`
 determines which tools the agent can even see.**
 
-- `test`: every tool is registered — ten reads (`meta.get_schema`,
+- `test`: every tool is registered — eleven reads (`meta.get_schema`,
   `meta.list_apps`, `meta.get_entity`, `meta.diff`, `meta.validate`,
   `meta.get_app`, `meta.list_templates`, `meta.get_template`,
-  `meta.template_dependents`, `meta.versions`, `meta.inventory`) and five
+  `meta.template_dependents`, `meta.versions`, `meta.inventory`) and seven
   writes (`meta.write_entity`, `meta.delete_entity`, `meta.write_app`,
-  `meta.write_template`, `meta.rollback`).
+  `meta.write_template`, `meta.rollback`, `meta.promote_preview`,
+  `meta.promote`).
 - `prod` (the default — an operator who forgets to set this gets the safe
-  option, not the dangerous one): **the five write tools are not registered
+  option, not the dangerous one): **the seven write tools are not registered
   at all.** They do not appear in the list an agent calling `tools/list`
   sees, so an agent on the prod profile cannot attempt them and be refused —
   it never learns they exist. This is deliberate (contracts/mcp-tools.md:
@@ -175,12 +176,19 @@ service-to-service auth requires — it is not a tenant selector, and any
 existing tenant slug works there regardless of which tenant a given call
 actually targets.
 
-Promoting meta from test to production is deliberately **not** an MCP tool —
-it is a human action taken in the admin UI, matching the write-less `prod`
-profile above. The prod server's role for an agent is verification after that
-human step: read the promoted entity or app back through
-`simplx-meta-prod`'s read tools and confirm it matches what was promoted,
-not to perform the promotion itself.
+Promoting meta from test to production (LAB-272) is an MCP capability on the
+**test profile only** — `meta.promote_preview` and `meta.promote` — never on
+`simplx-meta-prod`, matching the write-less `prod` profile above: it has no
+write tools of any kind, promotion included. The cycle: `meta.promote_preview`
+(addresses by `tenantSlug`, not the tenant id every other tool uses; diff and
+`templateStale` — a stale template must be promoted before an entity
+`basedOn` it) then `meta.promote` with `expectedTargetVersion` set to the
+preview's `targetVersion`, `null` included; a `version_conflict` means the
+target moved since the preview — re-preview, never retry blindly. Only call
+these on the tenant owner's explicit instruction. The prod server's role for
+an agent stays verification after a promotion: read the promoted entity or
+app back through `simplx-meta-prod`'s read tools and confirm it matches what
+was promoted.
 
 ## What the server itself teaches the agent (LAB-257 T259)
 
@@ -269,7 +277,7 @@ nobody" and normal credential hygiene — issue one key per person/agent
 deployment that needs one, name it so `listPlatformServiceKeys` output is
 legible later, and revoke it the moment it's no longer needed.
 
-## What the sixteen tools cover (and what they don't)
+## What the eighteen tools cover (and what they don't)
 
 | Tool | Kind | Covers |
 |---|---|---|
@@ -289,11 +297,14 @@ legible later, and revoke it the moment it's no longer needed.
 | `meta.write_app` | write | Creates or updates an app's own description |
 | `meta.write_template` | write | Updates a template, with a server-recounted dependents acknowledgement |
 | `meta.rollback` | write | Returns an entity, an app description, or a template to a previously saved version |
+| `meta.promote_preview` | write | Diff and target version a promotion to prod would produce, without changing anything |
+| `meta.promote` | write | Promotes an app, an entity, or a template from test to prod |
 
 **`meta.inventory` is a diagnostic, not a write gate.** It surfaces violations already present in stored meta — including ones the current `META_VALIDATION_MODE` would not currently block on write — and refuses outright (`meta_rules_unavailable`) rather than reporting a false "no violations" if the validation rules themselves can't be loaded. Reading `violations.length` instead of `tenantViolationCount` reproduces the standalone `meta-validation-report.ts` script's own trap: a raw count that is nonzero for annotated `admin`/`host` rows no running consumer even reads.
 
-**Every one of the sixteen tools now publishes a real input schema (LAB-257
-T243).** Before T241/T243, all sixteen tools shared one permissive fallback
+**Every one of the eighteen tools now publishes a real input schema (LAB-257
+T243; LAB-272's two promotion tools followed the same convention from the
+start).** Before T241/T243, all sixteen tools that existed then shared one permissive fallback
 (`z.record(z.string(), z.unknown()).optional()`) — an agent calling
 `tools/list` saw a tool name and an untyped bag, no parameter names, no
 types, no descriptions. T241 gave `meta.write_entity`, `meta.write_app`, and

@@ -8,6 +8,7 @@ import { deleteEntityTool, writeEntityTool } from "../src/tools/meta/write.js";
 import { writeAppTool } from "../src/tools/meta/app.js";
 import { writeTemplateTool } from "../src/tools/meta/templates.js";
 import { rollbackTool } from "../src/tools/meta/history.js";
+import { promotePreviewTool, promoteTool } from "../src/tools/meta/promote.js";
 
 /**
  * LAB-257 T048, half 1/2 — the COMPILE-TIME half.
@@ -113,5 +114,24 @@ describe("write-capability compile-time boundary — named write tools (LAB-257 
     registry.registerWriteTool(testProfile, rollbackTool);
 
     expect(registry.get(rollbackTool.name)).toBeDefined();
+  });
+
+  it("rejects a prod profile for meta.promote_preview and meta.promote at the type level (LAB-272 T063)", () => {
+    const connection = { baseUrl: "https://platform.example.test", tenantSlug: "acme", bearerToken: "token" };
+    const prodProfile = createProdProfile(connection);
+    const testProfile = createTestProfile(connection);
+    const registry = createToolRegistry();
+
+    // @ts-expect-error ProdProfile has no `write` member — meta.promote_preview
+    // cannot be registered against it, must be a compile error.
+    registry.registerWriteTool(prodProfile, promotePreviewTool);
+    // @ts-expect-error same for meta.promote.
+    registry.registerWriteTool(prodProfile, promoteTool);
+
+    registry.registerWriteTool(testProfile, promotePreviewTool);
+    registry.registerWriteTool(testProfile, promoteTool);
+
+    expect(registry.get(promotePreviewTool.name)).toBeDefined();
+    expect(registry.get(promoteTool.name)).toBeDefined();
   });
 });
