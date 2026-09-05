@@ -179,14 +179,19 @@ actually targets.
 Promoting meta from test to production (LAB-272) is an MCP capability on the
 **test profile only** — `meta.promote_preview` and `meta.promote` — never on
 `simplx-meta-prod`, matching the write-less `prod` profile above: it has no
-write tools of any kind, promotion included. The cycle: `meta.promote_preview`
-(addresses by `tenantSlug`, not the tenant id every other tool uses; diff and
-`templateStale` — a stale template must be promoted before an entity
-`basedOn` it) then `meta.promote` with `expectedTargetVersion` set to the
-preview's `targetVersion`, `null` included; a `version_conflict` means the
-target moved since the preview — re-preview, never retry blindly. Only call
-these on the tenant owner's explicit instruction. The prod server's role for
-an agent stays verification after a promotion: read the promoted entity or
+write tools of any kind, promotion included. Addressing is by `tenantSlug`
+(not the tenant id every other tool uses) + `app`, optionally adding `entity`
+for a single entity — OR `templateKey` alone, since templates are
+cross-tenant (`tenantSlug`/`app`/`entity` must then be absent, never
+combined). The cycle: `meta.promote_preview` (diff and `templateStale` — not
+`false` means a dependency template needs promoting first) then
+`meta.promote` with `expectedTargetVersion` set to the preview's
+`targetVersion`, `null` included; a `version_conflict` means the target moved
+since the preview — re-preview, never retry blindly. There is no
+`acknowledgedDependents` field — the platform recounts a template's
+dependents on the target itself as part of the promote call. Only call these
+on the tenant owner's explicit instruction. The prod server's role for an
+agent stays verification after a promotion: read the promoted entity or
 app back through `simplx-meta-prod`'s read tools and confirm it matches what
 was promoted.
 
