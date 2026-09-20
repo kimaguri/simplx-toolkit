@@ -328,6 +328,7 @@ func runStatus(args []string) {
 	sessionsDir := config.SessionsDir()
 	logsDir := config.LogsDir()
 	pm := process.NewProcessManager(sessionsDir, logsDir)
+	pm.Reconnect() // attach to live tmux sessions so status reports real state
 
 	if err := orchestrator.Status(os.Stdout, instance, pm); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)

@@ -69,7 +69,7 @@ func Up(opts UpOptions, proxyClient proxy.ProxyClient, pm *process.ProcessManage
 			Service: rs.Service,
 			Mode:    rs.Mode,
 			Domain:  domain,
-			URL:     "http://" + domain,
+			URL:     "https://" + domain,
 		}
 
 		p := planned{resolved: rs}

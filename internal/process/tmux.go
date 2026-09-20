@@ -80,6 +80,11 @@ func StartTmuxSession(name string, rows, cols int, command string, args []string
 		shellCmd = "cd " + shellQuote(workDir) + " && " + shellCmd
 	}
 
+	// Step 0: Kill any stale session with this name so new-session can't fail
+	// on a collision (which would otherwise force the PTY fallback, orphaning
+	// the dev process to the short-lived CLI). Harmless no-op if absent.
+	tmuxCmd("-L", tmuxSocket, "kill-session", "-t", sessName)
+
 	// Step 1: Create session with a placeholder shell.
 	// We'll replace it immediately with respawn-pane after configuring options.
 	createArgs := []string{
@@ -496,4 +501,29 @@ func tmuxCmd(args ...string) {
 // shellQuote wraps a string in single quotes for safe shell use.
 func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'"
+}
+
+// PanePID returns the PID of the process in this session's tmux pane, or 0.
+func (ts *TmuxSession) PanePID() int {
+	return tmuxPanePID(ts.name)
+}
+
+// tmuxPanePID queries the pane's root PID on the maomao socket. This PID
+// lives for the session's lifetime (the pane's `sh -c`), so it's a reliable
+// liveness signal — unlike the transient pid recorded on the PTY path.
+func tmuxPanePID(sessName string) int {
+	out, err := exec.Command("tmux", "-L", tmuxSocket,
+		"display-message", "-t", sessName, "-p", "#{pane_pid}").Output()
+	if err != nil {
+		return 0
+	}
+	pid, _ := strconv.Atoi(strings.TrimSpace(string(out)))
+	return pid
+}
+
+// KillTmuxSessionByName kills the tmux session backing the given process
+// name on the maomao socket, if present. Safe no-op if absent. Used by
+// orchestrator teardown to reap sessions this process never attached to.
+func KillTmuxSessionByName(name string) {
+	tmuxCmd("-L", tmuxSocket, "kill-session", "-t", "maomao-"+SafeName(name))
 }

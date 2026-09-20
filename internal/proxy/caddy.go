@@ -64,6 +64,7 @@ func (c *CaddyClient) EnsureRunning() error {
 	deadline := time.Now().Add(ensureTimeout)
 	for time.Now().Before(deadline) {
 		if c.ping() == nil {
+			trustCaddyCA()
 			return c.ensureBaseConfig()
 		}
 		time.Sleep(ensurePollStep)
@@ -80,6 +81,13 @@ func (c *CaddyClient) ping() error {
 	}
 	defer resp.Body.Close()
 	return nil
+}
+
+// trustCaddyCA installs Caddy's internal root CA into the system trust store
+// so browsers accept the local HTTPS certs devdash serves. Best-effort and
+// idempotent (no-op if already trusted); runs only when caddy is started.
+func trustCaddyCA() {
+	_ = exec.Command("caddy", "trust").Run()
 }
 
 // ensureBaseConfig makes sure an HTTP server named defaultServer exists on
@@ -99,10 +107,23 @@ func (c *CaddyClient) ensureBaseConfig() error {
 
 	base := map[string]any{
 		"apps": map[string]any{
+			// Serve every proxied domain over local HTTPS using Caddy's internal
+			// CA so cookie-auth apps work: remote backends set Secure/SameSite
+			// cookies that a browser drops on a plain-HTTP origin. `caddy trust`
+			// (run by EnsureRunning) adds the CA to the system trust store.
+			"tls": map[string]any{
+				"automation": map[string]any{
+					"policies": []any{
+						map[string]any{
+							"issuers": []any{map[string]any{"module": "internal"}},
+						},
+					},
+				},
+			},
 			"http": map[string]any{
 				"servers": map[string]any{
 					defaultServer: map[string]any{
-						"listen": []string{":80"},
+						"listen": []string{":80", ":443"},
 						"routes": []any{},
 					},
 				},
