@@ -419,6 +419,34 @@ Example (`~/.config/devdash/projects/simplx.json`):
     (`VITE_API_URL: "{platform}/api/v1"`) or alternate schemes
     (`VITE_MAINFRAME_URL: "ws://{platform.host}/api/rivet"`).
 
+### Prerequisites & gotchas (local services)
+
+Before `up` can actually launch a `local` service, three conditions must
+hold. They fail in slightly different ways — worth knowing:
+
+- **A worktree for `--branch` must exist in the service's repo.** `up`
+  resolves it via `git worktree list --porcelain` (exact branch match). A
+  service whose repo has no matching worktree is **skipped with a
+  warning** — but if any `env` template references that skipped service
+  (`{svc}` / `{svc.host}`), the *whole* `up` aborts with
+  `unknown service "<svc>" in placeholder`. So when a branch only touches
+  one repo, either create the branch's worktree in the sibling repos too
+  (recommended — keeps instances consistent), or force those siblings to
+  `--remote` for that `up`.
+
+- **`package` is the pnpm package *name*, not the directory.** It is
+  passed to `pnpm --filter <package> run <script>`, so it must match the
+  package's `name` field (e.g. `@repo/core`), not its folder (`core-ui`).
+  A directory name that isn't also the package name yields
+  `No projects matched the filters` and the service exits immediately.
+
+- **Each worktree needs its deps installed.** A freshly `git worktree
+  add`ed checkout has no `node_modules` (they aren't shared from the main
+  checkout). `up` will spawn the process, but it dies at once with
+  `<bin>: command not found` / `node_modules missing`, and `status` then
+  shows the service `stopped  pid 0`. Run `pnpm install` in each local
+  worktree once after creating it.
+
 ### Caddy prerequisite
 
 The orchestrator relies on [Caddy](https://caddyserver.com/) as the shared
