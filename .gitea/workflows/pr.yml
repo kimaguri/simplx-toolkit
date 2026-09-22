@@ -1,0 +1,22 @@
+# LAB-263 T206: Gitea PR gate for simplx-toolkit.
+#
+# Wires the shared simplx/dotgithub reusable checks. This is a Go repo and
+# the Gitea job image has no Go toolchain, so `quality` intentionally leaves
+# typecheck_cmd/lint_cmd/test_cmd/build_cmd empty/absent -- Go tests are not
+# part of the PR gate here, same as on GitHub today. Releases and the
+# Homebrew tap publish step stay on GitHub via the mirror (owner decision 3A);
+# this repo's .gitea/workflows/ therefore has no release.yml or
+# publish-simplx-mcp.yml counterpart.
+name: pr
+on:
+  pull_request:
+    branches: [main]
+jobs:
+  meta:
+    uses: simplx/dotgithub/.gitea/workflows/pr-meta.yml@main
+    secrets: inherit
+  quality:
+    uses: simplx/dotgithub/.gitea/workflows/pr-quality.yml@main
+    with:
+      pnpm_version: "9.15.9"
+      install_cmd: "true"
