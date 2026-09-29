@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"bytes"
 	"strings"
 	"testing"
 )
@@ -153,6 +154,53 @@ func TestRenderStatus_EmptyInstances(t *testing.T) {
 	out := RenderStatus(nil, live)
 	if containsLine(out, "▾") {
 		t.Errorf("expected no group headers for empty instances, got:\n%s", out)
+	}
+}
+
+// TestStatus_CrossInvocation_ReflectsRealLiveness reproduces the LAB-294
+// "status lies" bug (research.md Finding 2, Cause A): Status() is called by
+// a fresh CLI invocation, separate from the one that ran `up`. Without
+// pm.Reconnect() first, live() always reports false and every running
+// service is wrongly shown as stopped — TestRenderStatus_* above only test
+// RenderStatus's pure rendering logic with a fake live() closure and never
+// exercise Status()'s real pm wiring, so they don't catch this.
+func TestStatus_CrossInvocation_ReflectsRealLiveness(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	// "up" invocation.
+	pmUp := newDownTestProcessManager(t)
+	slug := "status-cross-invocation"
+	sessionName := "dev-" + slug + "-front"
+	startFakeSession(t, pmUp, sessionName)
+	t.Cleanup(func() { _ = pmUp.Stop(sessionName) })
+
+	inst := Instance{
+		Project: "simplx",
+		Branch:  slug,
+		Slug:    slug,
+		Services: []ServiceState{
+			{Service: "front", Mode: "local", Status: "running", SessionName: sessionName, Port: 5173},
+		},
+	}
+	if err := WriteInstance(inst); err != nil {
+		t.Fatalf("WriteInstance() error = %v", err)
+	}
+
+	// "status" invocation: a genuinely separate ProcessManager, as
+	// cmd/devdash/main.go's runStatus constructs, followed by the fix under
+	// test — pm.Reconnect() — before calling Status().
+	pmStatus := newDownTestProcessManager(t)
+	pmStatus.Reconnect()
+
+	var buf bytes.Buffer
+	if err := Status(&buf, slug, pmStatus); err != nil {
+		t.Fatalf("Status() error = %v", err)
+	}
+
+	out := buf.String()
+	mustContain(t, out, "running")
+	if strings.Contains(out, "stopped") {
+		t.Errorf("expected service to be reported as running (real liveness reconciled via Reconnect()), got:\n%s", out)
 	}
 }
 

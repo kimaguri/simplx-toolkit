@@ -239,3 +239,59 @@ func TestIntegration_ReadPTY_BulkOutput(t *testing.T) {
 		t.Errorf("%d out of %d lines missing spaces", spaceless, sbLen)
 	}
 }
+
+// TestIntegration_ReadPTY_CapturesInstantCrashOutput exercises the
+// PTY-fallback path (readPTY + startWithPTY) directly against a command that
+// writes one line then exits immediately — the scenario spec.md User Story 2
+// describes (e.g. platform crashing on a missing secret before any real
+// startup output). LAB-294 claimed logs can end up 0 bytes for this case;
+// this test locks in that readPTY's synchronous per-chunk write to logFile
+// (it writes before checking the read error, and only returns on a non-nil
+// error) already captures output even when EOF follows almost immediately —
+// see research.md's Phase 4 note. If a future change to readPTY/waitForExit
+// introduces a race that drops this output, this test should catch it.
+func TestIntegration_ReadPTY_CapturesInstantCrashOutput(t *testing.T) {
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "crash.log")
+	logFile, err := os.Create(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	vterm := NewVTermScreen(24, 80)
+	sl := NewSegmentedLog(filepath.Join(dir, "scrollback"), DefaultSegSize)
+	sc := NewScrollCapture(24, sl)
+	stop := make(chan struct{})
+
+	cmd := exec.Command("sh", "-c", "echo 'fatal: secret ADMIN_DATABASE_URL is not set' >&2; exit 1")
+	ptyFile, err := startWithPTY(cmd, 24, 80)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	done := make(chan struct{})
+	go func() {
+		readPTY(ptyFile, logFile, vterm, sc, stop)
+		close(done)
+	}()
+
+	cmd.Wait()
+	// Mirror waitForExit's real grace period exactly, rather than a longer
+	// ad-hoc sleep, so this test reflects production timing.
+	time.Sleep(200 * time.Millisecond)
+	close(stop)
+	<-done
+	ptyFile.Close()
+	logFile.Close()
+
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("reading log file: %v", err)
+	}
+	if len(data) == 0 {
+		t.Fatal("log file is 0 bytes — instant-crash output was lost")
+	}
+	if !strings.Contains(string(data), "ADMIN_DATABASE_URL") {
+		t.Errorf("expected log to contain the crash message, got: %q", string(data))
+	}
+}

@@ -38,6 +38,14 @@ type TmuxSession struct {
 	deadStatus int
 	exited     bool
 
+	// pid is the tmux pane's real child process PID (#{pane_pid}), captured
+	// once at creation/reconnect time — stable for the pane's lifetime.
+	// LAB-294: previously never recorded at all (SessionInfo.PID stayed 0
+	// for every tmux-backed service, permanently), which made `devdash
+	// status`'s pid column meaningless for the tmux backend regardless of
+	// liveness — see research.md Finding 2, Cause B.
+	pid int
+
 	// Lifecycle
 	stopPoller chan struct{}
 	done       chan struct{} // closed when process exits
@@ -93,7 +101,21 @@ func StartTmuxSession(name string, rows, cols int, command string, args []string
 
 	out, err := exec.Command("tmux", createArgs...).CombinedOutput()
 	if err != nil {
-		return nil, fmt.Errorf("tmux new-session failed: %w: %s", err, string(out))
+		// LAB-294: `new-session` fails if a session by this name already
+		// exists — e.g. a `remain-on-exit` session left over because
+		// nothing was alive to poll it dead and kill it (see
+		// specs/002-devdash-reliability/research.md Finding 1). Rather
+		// than silently falling back to a duplicate PTY-backed process
+		// (the caller's old behavior), kill whatever is at that name and
+		// retry once. If it still fails after that, it's a real,
+		// unexpected error — surface it instead of masking it.
+		if tmuxSessionExists(sessName) {
+			tmuxCmd("-L", tmuxSocket, "kill-session", "-t", sessName)
+			out, err = exec.Command("tmux", createArgs...).CombinedOutput()
+		}
+		if err != nil {
+			return nil, fmt.Errorf("tmux new-session failed: %w: %s", err, string(out))
+		}
 	}
 
 	// Step 2: Configure session options BEFORE starting the actual command.
@@ -124,6 +146,7 @@ func StartTmuxSession(name string, rows, cols int, command string, args []string
 		cols:       cols,
 		seglog:     seglog,
 		paneHeight: rows,
+		pid:        panePID(sessName),
 		stopPoller: make(chan struct{}),
 		done:       make(chan struct{}),
 	}
@@ -162,6 +185,7 @@ func ReconnectTmuxSession(name string, logPath string, startOffset int64, seglog
 		paneHeight: paneHeight,
 		paneDead:   dead,
 		deadStatus: deadStatus,
+		pid:        panePID(sessName),
 		stopPoller: make(chan struct{}),
 		done:       make(chan struct{}),
 	}
@@ -268,6 +292,13 @@ func (ts *TmuxSession) ExitCode() int {
 	ts.mu.RLock()
 	defer ts.mu.RUnlock()
 	return ts.deadStatus
+}
+
+// PID returns the tmux pane's real child process id, captured once at
+// creation/reconnect time (stable for the pane's lifetime). 0 if it could
+// not be determined (e.g. the pane died before the query ran).
+func (ts *TmuxSession) PID() int {
+	return ts.pid
 }
 
 // Kill sends C-c then kills the tmux session.
@@ -477,6 +508,27 @@ func paneInfoByName(sessName string) (histSize, paneHeight int, dead bool, deadS
 	deadStatus, _ = strconv.Atoi(parts[3])
 	altOn = parts[4] == "1"
 	return
+}
+
+// panePID queries tmux for the pane's real child process id
+// (#{pane_pid}). Returns 0 if the query fails or the pane is already dead
+// (a dead pane has no live child to report a pid for) — 0 is treated as
+// "unknown" by callers, matching the zero value SessionInfo.PID already had
+// before this feature's fix, so this is a strictly additive improvement.
+func panePID(sessName string) int {
+	out, err := exec.Command("tmux",
+		"-L", tmuxSocket,
+		"display-message", "-t", sessName,
+		"-p", "#{pane_pid}",
+	).Output()
+	if err != nil {
+		return 0
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(out)))
+	if err != nil {
+		return 0
+	}
+	return pid
 }
 
 // tmuxSessionExists checks if a tmux session exists on the maomao socket.

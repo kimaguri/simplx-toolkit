@@ -129,42 +129,58 @@ func (pm *ProcessManager) Start(info SessionInfo) (*RunningProcess, error) {
 	logBuf := NewSegmentedLog(scrollbackDir, DefaultMaxLines)
 	logBuf.Reset() // Clear stale scrollback from previous sessions
 
-	// Try tmux first, fall back to PTY+VTerm+ScrollCapture
+	// Prefer tmux when it's installed at all. Unlike before, a tmux failure
+	// here is a real, surfaced error — NOT a silent fall-through to the PTY
+	// path below. Falling through used to mean a tmux `new-session` name
+	// collision (a stale session from a previous instance) silently spawned
+	// a SECOND, PTY-backed process for the same logical service instead of
+	// erroring or reusing/replacing the original — see
+	// specs/002-devdash-reliability/research.md Finding 1. The PTY path is
+	// now reached ONLY when tmux isn't installed at all (IsTmuxAvailable()
+	// == false).
 	if IsTmuxAvailable() {
-		// Create log file for pipe-pane output
-		if err := os.MkdirAll(pm.logsDir, 0o755); err == nil {
-			logPath := pm.logFilePath(info.Name)
-			if logFile, err := os.Create(logPath); err == nil {
-				logFile.Close() // pipe-pane will append to this file
-
-				ts, err := StartTmuxSession(info.Name, int(defaultPTYRows), int(defaultPTYCols),
-					info.Command, info.Args, info.WorkDir, info.ExtraEnv, logPath, logBuf)
-				if err == nil {
-					info.StartedAt = time.Now().Unix()
-					if err := SaveSession(pm.sessionsDir, info); err != nil {
-						_, _ = fmt.Fprintf(os.Stderr, "warning: failed to save session %q: %v\n", info.Name, err)
-					}
-
-					done := make(chan struct{})
-					rp := &RunningProcess{
-						Info:      info,
-						LogBuf:    logBuf,
-						Status:    StatusRunning,
-						StartedAt: time.Unix(info.StartedAt, 0),
-						tmux:      ts,
-						done:      done,
-					}
-					pm.processes[info.Name] = rp
-
-					go pm.waitForTmuxExit(info.Name, ts, done)
-					return rp, nil
-				}
-			}
+		if err := os.MkdirAll(pm.logsDir, 0o755); err != nil {
+			return nil, fmt.Errorf("failed to create logs dir: %w", err)
 		}
-		// tmux failed, fall through to PTY path
+		logPath := pm.logFilePath(info.Name)
+		logFile, err := os.Create(logPath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create log file: %w", err)
+		}
+		logFile.Close() // pipe-pane will append to this file
+
+		ts, err := StartTmuxSession(info.Name, int(defaultPTYRows), int(defaultPTYCols),
+			info.Command, info.Args, info.WorkDir, info.ExtraEnv, logPath, logBuf)
+		if err != nil {
+			return nil, fmt.Errorf("failed to start tmux session for %q: %w", info.Name, err)
+		}
+
+		info.StartedAt = time.Now().Unix()
+		// LAB-294: previously never set for the tmux branch, so persisted
+		// SessionInfo.PID (and ServiceState.PID in the registry) was always
+		// 0 for tmux-backed services — see research.md Finding 2, Cause B.
+		info.PID = ts.PID()
+		if err := SaveSession(pm.sessionsDir, info); err != nil {
+			_, _ = fmt.Fprintf(os.Stderr, "warning: failed to save session %q: %v\n", info.Name, err)
+		}
+
+		done := make(chan struct{})
+		rp := &RunningProcess{
+			Info:      info,
+			LogBuf:    logBuf,
+			Status:    StatusRunning,
+			StartedAt: time.Unix(info.StartedAt, 0),
+			tmux:      ts,
+			done:      done,
+		}
+		pm.processes[info.Name] = rp
+
+		go pm.waitForTmuxExit(info.Name, ts, done)
+		return rp, nil
 	}
 
-	// Fallback: PTY+VTerm+ScrollCapture
+	// Fallback: PTY+VTerm+ScrollCapture — only reached when tmux isn't
+	// installed at all.
 	if err := os.MkdirAll(pm.logsDir, 0o755); err != nil {
 		return nil, fmt.Errorf("failed to create logs dir: %w", err)
 	}

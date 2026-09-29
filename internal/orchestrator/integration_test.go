@@ -70,11 +70,15 @@ func TestIntegration_FullLifecycle(t *testing.T) {
 		if rp == nil {
 			t.Fatalf("expected process manager to track session %q", local.SessionName)
 		}
-		// PID is only populated on the PTY fallback backend (0 is valid when
-		// the tmux backend is used, per process.ProcessManager.Start); assert
-		// liveness via the process manager itself instead of PID directly.
 		if rp.Status != process.StatusRunning {
 			t.Errorf("expected 'front' tracked process to be running, got status %v", rp.Status)
+		}
+		// LAB-294: PID is now populated for both backends — previously 0
+		// was "valid" for the tmux backend because it was never recorded at
+		// all (research.md Finding 2, Cause B). A real PID is required now,
+		// regardless of which backend actually ran.
+		if local.PID <= 0 {
+			t.Errorf("expected 'front' service to have a positive PID, got %d", local.PID)
 		}
 
 		remote := findService(t, inst, "platform")
@@ -237,6 +241,90 @@ func TestIntegration_FullLifecycle(t *testing.T) {
 			_ = pm.Stop(inst2Local.SessionName) // cleanup
 		}
 	})
+}
+
+// TestIntegration_UpDownUp_CrossInvocation reproduces the LAB-294 scenario
+// end-to-end: `up`, `down`, `up` again are three SEPARATE CLI invocations,
+// each with its own ProcessManager — unlike TestIntegration_FullLifecycle
+// above, which (like the original bug-hiding tests) shares one `pm` across
+// every step. Each step here reconnects fresh, exactly as
+// cmd/devdash/main.go's runUp/runDown do after this feature's fix. Proves:
+// down actually kills the real process, and the following up starts clean
+// (no tmux name-collision error, no duplicate process for the same
+// session name).
+func TestIntegration_UpDownUp_CrossInvocation(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	fakePnpmOnPath(t)
+
+	branch := "cross-invocation-cycle"
+	repoPath, _ := setupGitRepoWithWorktree(t, branch)
+
+	cfg := config.ProjectConfig{
+		Name:         "simplx",
+		DomainSuffix: "simplx.localhost",
+		Layout:       "worktree",
+		Repos:        map[string]string{"apps": repoPath},
+		Services: map[string]config.ServiceConfig{
+			"front": {Repo: "apps", Package: "", Script: "dev", Mode: "local"},
+		},
+	}
+	writeCentralProjectConfig(t, cfg)
+
+	opts := UpOptions{Project: "simplx", Branch: branch}
+
+	// Invocation 1: `up`.
+	pm1 := process.NewProcessManager(config.SessionsDir(), config.LogsDir())
+	pm1.Reconnect() // no-op first time, but matches runUp's real call site
+	fp1 := &fakeProxy{}
+	inst1, err := Up(opts, fp1, pm1)
+	if err != nil {
+		t.Fatalf("first Up() error = %v", err)
+	}
+	firstSession := findService(t, inst1, "front").SessionName
+	waitUntil(t, 2*time.Second, func() bool { return pm1.Get(firstSession) != nil })
+
+	// Invocation 2: `down`, via a FRESH ProcessManager + Reconnect().
+	pm2 := process.NewProcessManager(config.SessionsDir(), config.LogsDir())
+	pm2.Reconnect()
+	found, err := Down(inst1.Slug, fp1, pm2)
+	if err != nil {
+		t.Fatalf("Down() error = %v", err)
+	}
+	if !found {
+		t.Fatalf("expected Down() found=true")
+	}
+
+	// Invocation 3: `up` again, via ANOTHER fresh ProcessManager +
+	// Reconnect(). Must succeed cleanly — no tmux new-session collision,
+	// exactly one live process tracked for this session name.
+	pm3 := process.NewProcessManager(config.SessionsDir(), config.LogsDir())
+	pm3.Reconnect()
+	fp3 := &fakeProxy{}
+	inst2, err := Up(opts, fp3, pm3)
+	if err != nil {
+		t.Fatalf("second Up() (after down) error = %v", err)
+	}
+
+	local2 := findService(t, inst2, "front")
+	if local2.Status != "running" {
+		t.Errorf("expected 'front' status running after re-up, got %q", local2.Status)
+	}
+	waitUntil(t, 2*time.Second, func() bool { return pm3.Get(local2.SessionName) != nil })
+
+	running := 0
+	for _, rp := range pm3.List() {
+		if rp.Info.Name == local2.SessionName {
+			running++
+		}
+	}
+	if running != 1 {
+		t.Errorf("expected exactly 1 tracked process for session %q after re-up, found %d", local2.SessionName, running)
+	}
+
+	// Cleanup.
+	pmCleanup := process.NewProcessManager(config.SessionsDir(), config.LogsDir())
+	pmCleanup.Reconnect()
+	_, _ = Down(inst2.Slug, fp3, pmCleanup)
 }
 
 // findService returns a pointer to the named service in inst.Services,

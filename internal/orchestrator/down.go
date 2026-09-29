@@ -33,7 +33,15 @@ func Down(slug string, proxyClient proxy.ProxyClient, pm *process.ProcessManager
 		if svc.Mode == "remote" || svc.SessionName == "" {
 			continue
 		}
-		if err := pm.Stop(svc.SessionName); err != nil {
+		// LAB-294: use StopReconnected, not Stop. Down's pm is populated via
+		// pm.Reconnect() by the caller (a fresh ProcessManager from a
+		// separate CLI invocation than the one that started the service),
+		// so entries here are always reconnected (Cmd == nil for the
+		// PTY-fallback backend). Stop's PTY-kill branch requires Cmd != nil
+		// and would silently skip killing a reconnected PTY process;
+		// StopReconnected dispatches correctly for both backends (see
+		// research.md Finding 1 and internal/process/reconnect.go).
+		if err := pm.StopReconnected(svc.SessionName); err != nil {
 			// "process not found" means it's already stopped (e.g. exited on
 			// its own, or devdash restarted since); that's non-fatal for a
 			// teardown request. Collect any other, real error.

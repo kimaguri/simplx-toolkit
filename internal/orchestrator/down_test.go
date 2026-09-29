@@ -2,7 +2,9 @@ package orchestrator
 
 import (
 	"os"
+	"os/exec"
 	"testing"
+	"time"
 
 	"github.com/kimaguri/simplx-toolkit/internal/config"
 	"github.com/kimaguri/simplx-toolkit/internal/process"
@@ -114,6 +116,77 @@ func TestDown_StopsLocalProcsRemovesRoutesAndDeletesRegistry(t *testing.T) {
 	// B's registry file must be untouched.
 	if _, err := ReadInstance(slugB); err != nil {
 		t.Errorf("expected instance %q registry to remain, ReadInstance() error = %v", slugB, err)
+	}
+}
+
+// tmuxSessionExistsForTest is a test-local oracle, independent of
+// ProcessManager's own bookkeeping, for whether the real OS-level tmux
+// session backing a devdash session name is still alive. Mirrors the
+// "maomao-" + SafeName(name) naming in internal/process/tmux.go.
+func tmuxSessionExistsForTest(name string) bool {
+	err := exec.Command("tmux", "-L", "maomao", "has-session",
+		"-t", "maomao-"+process.SafeName(name)).Run()
+	return err == nil
+}
+
+// TestDown_CrossInvocation_ActuallyKillsRealProcess reproduces the LAB-294
+// root cause directly: `up` and `down` are separate CLI invocations, each
+// constructing its own ProcessManager. Down() must reconnect to (and
+// actually terminate) state persisted by a DIFFERENT, earlier
+// ProcessManager instance — not just state it started itself, which is all
+// TestDown_StopsLocalProcsRemovesRoutesAndDeletesRegistry above exercises.
+func TestDown_CrossInvocation_ActuallyKillsRealProcess(t *testing.T) {
+	if !process.IsTmuxAvailable() {
+		t.Skip("tmux not available; this test verifies the tmux-backend cross-invocation path")
+	}
+	t.Setenv("HOME", t.TempDir())
+
+	// "up" invocation: its ProcessManager and everything in-memory about it
+	// goes away once this function scope ends, exactly like a real `devdash
+	// up` process exiting after spawning a long-lived tmux-backed service.
+	pmUp := newDownTestProcessManager(t)
+	slug := "cross-invocation"
+	sessionName := "dev-" + slug + "-front"
+	startFakeSession(t, pmUp, sessionName)
+
+	if !tmuxSessionExistsForTest(sessionName) {
+		t.Fatalf("setup: expected tmux session for %q to exist after Start", sessionName)
+	}
+
+	inst := Instance{
+		Project: "simplx",
+		Branch:  slug,
+		Slug:    slug,
+		Services: []ServiceState{
+			{Service: "front", Mode: "local", Status: "running", SessionName: sessionName, Port: 5173},
+		},
+	}
+	if err := WriteInstance(inst); err != nil {
+		t.Fatalf("WriteInstance() error = %v", err)
+	}
+
+	// "down" invocation: a genuinely SEPARATE ProcessManager, as
+	// cmd/devdash/main.go's runDown constructs. Without pm.Reconnect(),
+	// pmDown.processes is empty and Down() would silently no-op.
+	pmDown := newDownTestProcessManager(t)
+	pmDown.Reconnect()
+	fp := &downFakeProxy{}
+
+	found, err := Down(slug, fp, pmDown)
+	if err != nil {
+		t.Fatalf("Down() error = %v", err)
+	}
+	if !found {
+		t.Fatalf("expected found=true")
+	}
+
+	deadline := time.Now().Add(5 * time.Second)
+	for tmuxSessionExistsForTest(sessionName) && time.Now().Before(deadline) {
+		time.Sleep(50 * time.Millisecond)
+	}
+	if tmuxSessionExistsForTest(sessionName) {
+		t.Errorf("expected tmux session for %q to be killed by Down(), but it still exists — "+
+			"Down() must have silently no-op'd instead of actually terminating the reconnected process", sessionName)
 	}
 }
 

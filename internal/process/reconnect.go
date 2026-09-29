@@ -95,6 +95,16 @@ func (pm *ProcessManager) Reconnect() []*RunningProcess {
 }
 
 // StopReconnected kills a process that was reconnected (no exec.Cmd available)
+// for the PTY backend. For a reconnected TMUX-backed session — which also
+// has Cmd == nil, since Reconnect never populates it — it must be checked
+// FIRST and delegated to pm.Stop, which already knows how to kill a tmux
+// session correctly (send Ctrl-C, then kill-session). Checking rp.Cmd != nil
+// before rp.tmux != nil would route every reconnected tmux session into the
+// raw-PID kill path below using Info.PID, which for tmux-backed sessions is
+// not a meaningful process to signal directly (see
+// internal/process/manager.go's tmux Start branch and
+// specs/002-devdash-reliability/research.md Finding 1/2) — it would
+// silently fail to kill the real session.
 func (pm *ProcessManager) StopReconnected(name string) error {
 	pm.mu.Lock()
 	rp, exists := pm.processes[name]
@@ -103,13 +113,21 @@ func (pm *ProcessManager) StopReconnected(name string) error {
 		return fmt.Errorf("process %q not found", name)
 	}
 
-	if rp.Cmd != nil {
+	if rp.tmux != nil || rp.Cmd != nil {
 		pm.mu.Unlock()
 		return pm.Stop(name)
 	}
 
 	pid := rp.Info.PID
 	pm.mu.Unlock()
+
+	if pid <= 0 {
+		pm.mu.Lock()
+		delete(pm.processes, name)
+		pm.mu.Unlock()
+		_ = RemoveSession(pm.sessionsDir, name)
+		return fmt.Errorf("process %q has no usable pid to stop (reconnected with pid<=0)", name)
+	}
 
 	// Stop tailing
 	if rp.tailStop != nil {

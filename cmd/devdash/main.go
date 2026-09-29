@@ -191,6 +191,17 @@ func runUp(args []string) {
 	}
 
 	pm := process.NewProcessManager(sessionsDir, logsDir)
+	// LAB-294: `up` is idempotent per Up()'s doc comment — "services already
+	// running (per pm) are left untouched" — but that check (pm.Get) only
+	// sees anything if pm has been reconnected to state from a PRIOR `up`
+	// invocation (a separate process). Without this, every `up` believes
+	// nothing is running yet and always tries to spawn fresh, which for the
+	// tmux backend collides with a still-live (or dead-but-remain-on-exit)
+	// session of the same name — see research.md Finding 1. Reconnect()
+	// also self-heals a dead-but-lingering tmux session (it detects
+	// pane_dead and kills it) as a side effect of reconnecting, closing off
+	// the collision case entirely for the common path.
+	pm.Reconnect()
 	proxyClient := proxy.NewCaddyClient()
 
 	opts := orchestrator.UpOptions{
@@ -328,6 +339,11 @@ func runStatus(args []string) {
 	sessionsDir := config.SessionsDir()
 	logsDir := config.LogsDir()
 	pm := process.NewProcessManager(sessionsDir, logsDir)
+	// LAB-294: this is a fresh CLI invocation, separate from the one that
+	// ran `up` — without reconnecting, pm.processes is empty and every
+	// local service's liveness check reports "stopped" regardless of
+	// reality (see research.md Finding 2, Cause A).
+	pm.Reconnect()
 
 	if err := orchestrator.Status(os.Stdout, instance, pm); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -383,6 +399,12 @@ func runDown(args []string) {
 	}
 
 	pm := process.NewProcessManager(sessionsDir, logsDir)
+	// LAB-294: `down` runs in a fresh CLI invocation, separate from the one
+	// that ran `up` — without reconnecting, pm.processes is empty, so
+	// pm.Stop always returns "not found" and Down silently no-ops instead
+	// of actually killing the real process/tmux session (research.md
+	// Finding 1).
+	pm.Reconnect()
 	proxyClient := proxy.NewCaddyClient()
 
 	found, err := orchestrator.Down(instance, proxyClient, pm)

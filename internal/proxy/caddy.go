@@ -25,6 +25,10 @@ const (
 // implements ProxyClient.
 type CaddyClient struct {
 	httpClient *http.Client
+	// baseURL overrides adminBaseURL when set — test-only seam (unexported,
+	// same-package tests construct a CaddyClient directly and point it at an
+	// httptest server instead of the real Caddy admin API).
+	baseURL string
 }
 
 // NewCaddyClient returns a CaddyClient ready to use.
@@ -37,6 +41,15 @@ func (c *CaddyClient) client() *http.Client {
 		c.httpClient = &http.Client{Timeout: 5 * time.Second}
 	}
 	return c.httpClient
+}
+
+// base returns the admin API base URL: baseURL if set (test seam), else the
+// real adminBaseURL constant.
+func (c *CaddyClient) base() string {
+	if c.baseURL != "" {
+		return c.baseURL
+	}
+	return adminBaseURL
 }
 
 // EnsureRunning makes sure Caddy's admin API is reachable, launching it
@@ -69,12 +82,12 @@ func (c *CaddyClient) EnsureRunning() error {
 		time.Sleep(ensurePollStep)
 	}
 
-	return fmt.Errorf("proxy: caddy admin API at %s did not become ready within %s (is port 2019 blocked, or did caddy fail to bind port 80?)", adminBaseURL, ensureTimeout)
+	return fmt.Errorf("proxy: caddy admin API at %s did not become ready within %s (is port 2019 blocked, or did caddy fail to bind port 80?)", c.base(), ensureTimeout)
 }
 
 // ping checks whether the admin API responds.
 func (c *CaddyClient) ping() error {
-	resp, err := c.client().Get(adminBaseURL + "/config/")
+	resp, err := c.client().Get(c.base() + "/config/")
 	if err != nil {
 		return err
 	}
@@ -85,7 +98,7 @@ func (c *CaddyClient) ping() error {
 // ensureBaseConfig makes sure an HTTP server named defaultServer exists on
 // :80 with a routes array, without clobbering any existing routes.
 func (c *CaddyClient) ensureBaseConfig() error {
-	req, err := http.NewRequest(http.MethodGet, adminBaseURL+"/config/apps/http/servers/"+defaultServer, nil)
+	req, err := http.NewRequest(http.MethodGet, c.base()+"/config/apps/http/servers/"+defaultServer, nil)
 	if err != nil {
 		return fmt.Errorf("proxy: building base-config check request: %w", err)
 	}
@@ -115,7 +128,7 @@ func (c *CaddyClient) ensureBaseConfig() error {
 		return fmt.Errorf("proxy: marshaling base config: %w", err)
 	}
 
-	putReq, err := http.NewRequest(http.MethodPost, adminBaseURL+"/load", bytes.NewReader(body))
+	putReq, err := http.NewRequest(http.MethodPost, c.base()+"/load", bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("proxy: building base-config load request: %w", err)
 	}
@@ -133,15 +146,42 @@ func (c *CaddyClient) ensureBaseConfig() error {
 	return nil
 }
 
-// AddRoute registers r under the base HTTP server's routes list via the
-// admin API's config-tree append endpoint.
+// AddRoute registers (or replaces) r idempotently. LAB-294: a plain
+// POST-append (the old behavior) fails with a Caddy 400 if a route with the
+// same "@id" already exists — e.g. from a prior `up` that partially
+// registered routes before failing on a later service, and is then retried
+// — because Caddy enforces @id uniqueness across the whole config (see
+// specs/002-devdash-reliability/research.md Finding 4). AddRoute now tries
+// an in-place replace first (PATCH /id/<id>, addressed by the same "@id" tag
+// CaddyJSON already sets), and only falls back to the create/append POST
+// when that 404s (the route genuinely doesn't exist yet).
 func (c *CaddyClient) AddRoute(r Route) error {
 	body, err := r.CaddyJSON()
 	if err != nil {
 		return fmt.Errorf("proxy: building route JSON for %s: %w", r.ID, err)
 	}
 
-	url := fmt.Sprintf("%s/config/apps/http/servers/%s/routes", adminBaseURL, defaultServer)
+	patchReq, err := http.NewRequest(http.MethodPatch, c.base()+"/id/"+r.ID, bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("proxy: building replace-route request for %s: %w", r.ID, err)
+	}
+	patchReq.Header.Set("Content-Type", "application/json")
+
+	patchResp, err := c.client().Do(patchReq)
+	if err != nil {
+		return fmt.Errorf("proxy: replacing route %s: %w", r.ID, err)
+	}
+	defer patchResp.Body.Close()
+
+	if patchResp.StatusCode < 300 {
+		return nil
+	}
+	if patchResp.StatusCode != http.StatusNotFound {
+		return fmt.Errorf("proxy: caddy rejected route replace %s (status %d)", r.ID, patchResp.StatusCode)
+	}
+
+	// Route doesn't exist yet — create it via append.
+	url := fmt.Sprintf("%s/config/apps/http/servers/%s/routes", c.base(), defaultServer)
 	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("proxy: building add-route request for %s: %w", r.ID, err)
@@ -170,7 +210,7 @@ func (c *CaddyClient) RemoveRoutesByInstance(slug string) error {
 	}
 
 	for _, id := range ids {
-		req, err := http.NewRequest(http.MethodDelete, adminBaseURL+"/id/"+id, nil)
+		req, err := http.NewRequest(http.MethodDelete, c.base()+"/id/"+id, nil)
 		if err != nil {
 			return fmt.Errorf("proxy: building delete request for route %s: %w", id, err)
 		}
@@ -189,7 +229,7 @@ func (c *CaddyClient) RemoveRoutesByInstance(slug string) error {
 // routeIDsForInstance queries the current route list and returns the @id
 // of every route namespaced under "<slug>-".
 func (c *CaddyClient) routeIDsForInstance(slug string) ([]string, error) {
-	url := fmt.Sprintf("%s/config/apps/http/servers/%s/routes", adminBaseURL, defaultServer)
+	url := fmt.Sprintf("%s/config/apps/http/servers/%s/routes", c.base(), defaultServer)
 	resp, err := c.client().Get(url)
 	if err != nil {
 		return nil, err
