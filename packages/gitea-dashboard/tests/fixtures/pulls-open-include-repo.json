@@ -1,0 +1,26 @@
+[
+  {
+    "id": 4001,
+    "number": 3,
+    "title": "External fix",
+    "user": { "login": "bob" },
+    "updated_at": "2026-09-26T04:00:00Z",
+    "html_url": "https://git.example.test/bob/side/pulls/3",
+    "head": { "ref": "fix", "sha": "d3adbeefcafe00000000000000000000000004" },
+    "base": { "ref": "main", "sha": "a1b2c3d4e5f60000000000000000000000000000" },
+    "mergeable": true,
+    "draft": false
+  },
+  {
+    "id": 4002,
+    "number": 4,
+    "title": "My contribution",
+    "user": { "login": "me" },
+    "updated_at": "2026-09-26T03:00:00Z",
+    "html_url": "https://git.example.test/bob/side/pulls/4",
+    "head": { "ref": "contrib", "sha": "d3adbeefcafe00000000000000000000000005" },
+    "base": { "ref": "main", "sha": "a1b2c3d4e5f60000000000000000000000000000" },
+    "mergeable": true,
+    "draft": false
+  }
+]

@@ -1,0 +1,23 @@
+{
+  "total_count": 3,
+  "workflows": [
+    {
+      "id": "ci.yml",
+      "name": "CI",
+      "path": ".gitea/workflows/ci.yml",
+      "state": "active"
+    },
+    {
+      "id": "lint.yml",
+      "name": "Lint",
+      "path": ".gitea/workflows/lint.yml",
+      "state": "active"
+    },
+    {
+      "id": "nightly.yml",
+      "name": "Nightly",
+      "path": ".gitea/workflows/nightly.yml",
+      "state": "active"
+    }
+  ]
+}

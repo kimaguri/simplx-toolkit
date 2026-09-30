@@ -1,0 +1,46 @@
+/*
+ * Popup-only Tailwind build (T040). The popup only ever renders compact-
+ * density lists/tabs -- it never mounts the dashboard's sidebar, command
+ * palette (cmdk), tag palette, or tables. Sharing globals.css with the
+ * dashboard/options pages meant Tailwind emitted one 74 KB stylesheet
+ * covering *every* utility class used anywhere in the extension, all of
+ * which the popup loaded too.
+ *
+ * `source(none)` disables Tailwind's automatic "scan everything near this
+ * file" heuristic; the explicit `@source` list below is the only content
+ * this stylesheet's utilities are generated from. `@source not` (Tailwind
+ * v4, confirmed supported by the installed tailwindcss@4.3.3 -- see the
+ * `negated` SourceEntry field in @tailwindcss/oxide and the `E[0]==="n" &&
+ * ...startsWith("not ")` parsing in tailwindcss/dist/lib.js) excludes the
+ * dashboard-only files that live inside otherwise-included directories.
+ */
+@import "tailwindcss" source(none);
+@import "tw-animate-css";
+@import "./theme.css";
+
+@source "../entrypoints/popup/**/*.{ts,tsx}";
+
+@source "../features/**/*.{ts,tsx}";
+@source not "../features/prs/PrsTable.tsx";
+@source not "../features/prs/prs-columns.tsx";
+@source not "../features/prs/PrsFilters.tsx";
+@source not "../features/builds/BuildsHistory.tsx";
+@source not "../features/builds/HistoryStats.tsx";
+@source not "../features/builds/HistoryFilters.tsx";
+@source not "../features/builds/comfortable-row.tsx";
+@source not "../features/builds/run-jobs.ts";
+@source not "../features/builds/history-loader.ts";
+@source not "../features/builds/use-run-stages.ts";
+@source not "../features/builds/RunStageDetail.tsx";
+@source not "../features/repos/RepoColorPicker.tsx";
+@source not "../features/repos/RepoColorsProvider.tsx";
+
+@source "../ui/**/*.tsx";
+@source not "../ui/Tags.tsx";
+
+@source "../components/ui/badge.tsx";
+@source "../components/ui/button.tsx";
+@source "../components/ui/tabs.tsx";
+@source "../components/ui/separator.tsx";
+@source "../components/ui/collapsible.tsx";
+@source "../components/ui/alert.tsx";
