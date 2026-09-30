@@ -443,6 +443,11 @@ migrated automatically and transparently to `~/.config/devdash/` (config,
 upgrading — no manual steps, and already-running processes stay
 reconnectable.
 
+## Packages
+
+- [`packages/gitea-dashboard`](packages/gitea-dashboard/README.md) — Chrome extension for our Gitea (`git.sadmin.app`): repos, pull requests, Actions builds (read-only). Build from source: `cd packages/gitea-dashboard && pnpm install --frozen-lockfile && pnpm build`, then load `.output/chrome-mv3` unpacked in `chrome://extensions`.
+- `packages/simplx-mcp` — SimplX meta MCP server.
+
 ## Development
 
 ```bash
