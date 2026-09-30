@@ -1,0 +1,964 @@
+{
+  "extName": {
+    "message": "Gitea Dashboard",
+    "description": "Название расширения"
+  },
+  "extDescription": {
+    "message": "Быстрый доступ к репозиториям, PR и сборкам Gitea",
+    "description": "Описание расширения"
+  },
+  "actionTitle": {
+    "message": "Gitea Dashboard",
+    "description": "Заголовок кнопки действия панели инструментов"
+  },
+  "omniboxDescription": {
+    "message": "Перейти к репозиторию Gitea",
+    "description": "Описание подсказки омнибокса"
+  },
+  "omniboxNotConfigured": {
+    "message": "Подключение не настроено — нажмите Enter, чтобы открыть настройки",
+    "description": "Подсказка омнибокса по умолчанию, когда инстанс ещё не подключён"
+  },
+  "statusWaiting": {
+    "message": "Ожидание",
+    "description": "Состояние запуска: в очереди"
+  },
+  "statusBlocked": {
+    "message": "Заблокирован",
+    "description": "Состояние запуска: заблокирован"
+  },
+  "statusRunning": {
+    "message": "Выполняется",
+    "description": "Состояние запуска: выполняется"
+  },
+  "statusSuccess": {
+    "message": "Успешно",
+    "description": "Состояние: успех"
+  },
+  "statusFailure": {
+    "message": "Ошибка",
+    "description": "Состояние: провал"
+  },
+  "statusCancelled": {
+    "message": "Отменён",
+    "description": "Состояние запуска: отменён"
+  },
+  "statusSkipped": {
+    "message": "Пропущен",
+    "description": "Состояние: пропущено"
+  },
+  "statusError": {
+    "message": "Сбой проверки",
+    "description": "Состояние CI: ошибка"
+  },
+  "statusPending": {
+    "message": "В процессе",
+    "description": "Состояние CI: ожидание"
+  },
+  "statusWarning": {
+    "message": "Предупреждение",
+    "description": "Состояние CI: предупреждение"
+  },
+  "statusNone": {
+    "message": "Нет проверок",
+    "description": "Состояние CI: проверок нет"
+  },
+  "errorStateOpenOptions": {
+    "message": "Открыть настройки",
+    "description": "Кнопка на экране ошибки"
+  },
+  "staleMessage": {
+    "message": "Данные на $1, нет связи",
+    "description": "Баннер устаревших данных с временем последнего обновления",
+    "placeholders": {
+      "1": {
+        "content": "$1"
+      }
+    }
+  },
+  "tabRepos": {
+    "message": "Репо",
+    "description": "Вкладка окна: репозитории"
+  },
+  "tabPrs": {
+    "message": "PR",
+    "description": "Вкладка окна: пул-реквесты"
+  },
+  "tabBuilds": {
+    "message": "Сборки",
+    "description": "Вкладка окна: сборки"
+  },
+  "tabPlaceholder": {
+    "message": "Раздел в разработке",
+    "description": "Временная заглушка содержимого вкладки"
+  },
+  "reposSearchPlaceholder": {
+    "message": "Поиск репозитория…",
+    "description": "Плейсхолдер поля поиска репозиториев"
+  },
+  "reposNotConfigured": {
+    "message": "Подключение не настроено",
+    "description": "Вкладка «Репо»: инстанс Gitea ещё не подключён"
+  },
+  "reposEmpty": {
+    "message": "Репозитории не найдены",
+    "description": "Вкладка «Репо»: пустой результат поиска"
+  },
+  "reposSearchError": {
+    "message": "Не удалось загрузить репозитории",
+    "description": "Вкладка «Репо»: ошибка поиска репозиториев"
+  },
+  "reposPrivate": {
+    "message": "Приватный репозиторий",
+    "description": "Признак приватности репозитория"
+  },
+  "repoColorButton": {
+    "message": "Цвет репозитория",
+    "description": "Кнопка выбора цвета тега репозитория на странице Репо"
+  },
+  "repoColorTone": {
+    "message": "Цвет $1",
+    "description": "Вариант цвета в палитре, $1 - номер",
+    "placeholders": {
+      "1": {
+        "content": "$1"
+      }
+    }
+  },
+  "repoColorAuto": {
+    "message": "Авто",
+    "description": "Сброс цвета репозитория к автоматическому"
+  },
+  "reposTogglePin": {
+    "message": "Закрепить или открепить репозиторий",
+    "description": "Кнопка закрепления репозитория"
+  },
+  "reposPinned": {
+    "message": "Репозиторий закреплён",
+    "description": "Значок закреплённого репозитория"
+  },
+  "reposUnpinned": {
+    "message": "Репозиторий не закреплён",
+    "description": "Значок незакреплённого репозитория"
+  },
+  "popupUnconfigured": {
+    "message": "Подключение не настроено. Откройте настройки, чтобы добавить сервер Gitea.",
+    "description": "Окно: нет активного инстанса или токена"
+  },
+  "authError": {
+    "message": "Токен недействителен. Откройте настройки, чтобы обновить его.",
+    "description": "Окно: во всех вкладках вместо содержимого при ошибке авторизации"
+  },
+  "buildsGroupMine": {
+    "message": "Мои и закреплённые",
+    "description": "Вкладка «Сборки»: заголовок группы своих и закреплённых запусков"
+  },
+  "buildsGroupOthers": {
+    "message": "Остальные",
+    "description": "Вкладка «Сборки»: заголовок свёрнутой по умолчанию группы прочих запусков"
+  },
+  "buildsOthersCounter": {
+    "message": "$1 активно, $2 упало",
+    "description": "Вкладка «Сборки»: счётчик активных и упавших запусков в группе «Остальные»",
+    "placeholders": {
+      "1": {
+        "content": "$1"
+      },
+      "2": {
+        "content": "$2"
+      }
+    }
+  },
+  "buildsEmpty": {
+    "message": "Нет активных сборок",
+    "description": "Вкладка «Сборки»: пустой список запусков"
+  },
+  "buildsUnsupported": {
+    "message": "Gitea Actions не поддерживается этим сервером",
+    "description": "Вкладка «Сборки»: capabilities.actions === 'unsupported'"
+  },
+  "buildsForbidden": {
+    "message": "Недостаточно прав для просмотра сборок",
+    "description": "Вкладка «Сборки»: capabilities.actions === 'forbidden'"
+  },
+  "buildsSectionError": {
+    "message": "Не удалось загрузить сборки",
+    "description": "Вкладка «Сборки»: snapshot.sectionErrors.runs"
+  },
+  "prsGroupReview": {
+    "message": "Нужно моё ревью",
+    "description": "Вкладка «PR»: группа PR, где я — запрошенный ревьюер"
+  },
+  "prsGroupMine": {
+    "message": "Мои PR",
+    "description": "Вкладка «PR»: группа PR, которые я создал"
+  },
+  "prsGroupOther": {
+    "message": "Остальные открытые",
+    "description": "Вкладка «PR»: группа остальных открытых PR (отключается в настройках)"
+  },
+  "prsGroupReviewEmpty": {
+    "message": "Нет PR, ожидающих вашего ревью",
+    "description": "Вкладка «PR»: пустая группа «Нужно моё ревью»"
+  },
+  "prsGroupMineEmpty": {
+    "message": "У вас нет открытых PR",
+    "description": "Вкладка «PR»: пустая группа «Мои PR»"
+  },
+  "prsGroupOtherEmpty": {
+    "message": "Нет остальных открытых PR",
+    "description": "Вкладка «PR»: пустая группа «Остальные открытые»"
+  },
+  "prsDraftBadge": {
+    "message": "черновик",
+    "description": "Вкладка «PR»: признак черновика PR"
+  },
+  "prsConflictBadge": {
+    "message": "конфликт",
+    "description": "Вкладка «PR»: признак конфликта слияния PR"
+  },
+  "prsEmpty": {
+    "message": "PR не найдены",
+    "description": "Вкладка «PR»: нет данных ни в одной видимой группе"
+  },
+  "prsErrorNetwork": {
+    "message": "Нет связи с сервером Gitea",
+    "description": "Вкладка «PR»: ошибка секции — сеть недоступна"
+  },
+  "prsErrorForbidden": {
+    "message": "Недостаточно прав токена для загрузки PR",
+    "description": "Вкладка «PR»: ошибка секции — не хватает прав токена"
+  },
+  "prsErrorServer": {
+    "message": "Сервер Gitea ответил ошибкой",
+    "description": "Вкладка «PR»: ошибка секции — сбой на сервере"
+  },
+  "optionsTitle": {
+    "message": "Gitea Dashboard — настройки",
+    "description": "Настройки: заголовок страницы (T078)"
+  },
+  "optionsSectionConnection": {
+    "message": "Подключение",
+    "description": "Настройки: заголовок секции подключения"
+  },
+  "optionsSectionConnectionDescription": {
+    "message": "Адрес вашего Gitea и токен с правами только на чтение",
+    "description": "Настройки: пояснение секции подключения (T078)"
+  },
+  "optionsUrlLabel": {
+    "message": "Адрес Gitea",
+    "description": "Настройки: подпись поля адреса"
+  },
+  "optionsTokenLabel": {
+    "message": "Личный токен доступа",
+    "description": "Настройки: подпись поля токена"
+  },
+  "optionsTokenPlaceholder": {
+    "message": "Вставьте токен",
+    "description": "Настройки: плейсхолдер поля токена"
+  },
+  "optionsTokenSaved": {
+    "message": "Токен сохранён",
+    "description": "Настройки: индикатор, что токен уже сохранён"
+  },
+  "optionsTokenReplace": {
+    "message": "Заменить",
+    "description": "Настройки: кнопка замены сохранённого токена"
+  },
+  "optionsCreateTokenLink": {
+    "message": "Создать токен в Gitea",
+    "description": "Настройки: ссылка на страницу создания токена"
+  },
+  "optionsScopesTitle": {
+    "message": "Минимальные права токена (только чтение)",
+    "description": "Настройки: заголовок списка необходимых прав токена"
+  },
+  "scopeReadRepository": {
+    "message": "read:repository — просмотр репозиториев",
+    "description": "Настройки: пояснение права read:repository"
+  },
+  "scopeReadIssue": {
+    "message": "read:issue — просмотр задач и pull request'ов",
+    "description": "Настройки: пояснение права read:issue"
+  },
+  "scopeReadUser": {
+    "message": "read:user — данные учётной записи",
+    "description": "Настройки: пояснение права read:user"
+  },
+  "scopeReadOrganization": {
+    "message": "read:organization — список организаций",
+    "description": "Настройки: пояснение права read:organization"
+  },
+  "scopeReadNotification": {
+    "message": "read:notification — уведомления Gitea",
+    "description": "Настройки: пояснение права read:notification"
+  },
+  "optionsSaveButton": {
+    "message": "Сохранить",
+    "description": "Настройки: кнопка сохранения"
+  },
+  "optionsCheckButton": {
+    "message": "Проверить подключение",
+    "description": "Настройки: кнопка проверки подключения"
+  },
+  "optionsInvalidUrl": {
+    "message": "Неверный адрес Gitea",
+    "description": "Настройки: адрес не прошёл проверку перед сохранением"
+  },
+  "optionsPermissionDenied": {
+    "message": "Доступ к адресу не предоставлен — настройки не сохранены",
+    "description": "Настройки: браузер отклонил запрос разрешения на адрес"
+  },
+  "optionsSaveSuccess": {
+    "message": "Настройки сохранены",
+    "description": "Настройки: подтверждение сохранения"
+  },
+  "optionsLoginLabel": {
+    "message": "Учётная запись: $1",
+    "description": "Настройки: логин из отчёта проверки подключения",
+    "placeholders": {
+      "1": {
+        "content": "$1"
+      }
+    }
+  },
+  "optionsVersionValueLabel": {
+    "message": "Версия Gitea: $1",
+    "description": "Настройки: версия сервера из отчёта проверки подключения",
+    "placeholders": {
+      "1": {
+        "content": "$1"
+      }
+    }
+  },
+  "optionsMissingScopesLabel": {
+    "message": "Не хватает прав: $1",
+    "description": "Настройки: список недостающих прав токена",
+    "placeholders": {
+      "1": {
+        "content": "$1"
+      }
+    }
+  },
+  "optionsExtensionVersion": {
+    "message": "Версия расширения: $1",
+    "description": "Настройки: номер версии расширения (FR-075)",
+    "placeholders": {
+      "1": {
+        "content": "$1"
+      }
+    }
+  },
+  "optionsActionsMode_org": {
+    "message": "Сборки доступны (по организациям)",
+    "description": "Настройки: режим доступа к сборкам — по организациям"
+  },
+  "optionsActionsMode_repo": {
+    "message": "Сборки доступны (по репозиториям)",
+    "description": "Настройки: режим доступа к сборкам — по репозиториям"
+  },
+  "optionsActionsMode_unsupported": {
+    "message": "Сборки недоступны на этой версии Gitea",
+    "description": "Настройки: сборки не поддерживаются сервером"
+  },
+  "optionsActionsMode_forbidden": {
+    "message": "Сборки недоступны: не хватает прав токена",
+    "description": "Настройки: сборки заблокированы правами токена"
+  },
+  "diag_ok": {
+    "message": "Подключение работает",
+    "description": "Диагностика подключения: успех"
+  },
+  "diag_bad_url": {
+    "message": "Неверный адрес Gitea",
+    "description": "Диагностика подключения: адрес не прошёл проверку"
+  },
+  "diag_unreachable": {
+    "message": "Сервер недоступен по этому адресу",
+    "description": "Диагностика подключения: сервер недоступен"
+  },
+  "diag_auth": {
+    "message": "Токен недействителен",
+    "description": "Диагностика подключения: ошибка авторизации"
+  },
+  "diag_scope": {
+    "message": "Токену не хватает прав",
+    "description": "Диагностика подключения: недостаточно прав токена"
+  },
+  "diag_not_gitea": {
+    "message": "Адрес не похож на сервер Gitea",
+    "description": "Диагностика подключения: ответ сервера не похож на Gitea"
+  },
+  "prsMoreLink": {
+    "message": "ещё $1",
+    "description": "Вкладка «PR»: ссылка «ещё N», открывающая остальные PR группы на самом инстансе Gitea",
+    "placeholders": {
+      "1": {
+        "content": "$1"
+      }
+    }
+  },
+  "notifyBuildFailedTitle": {
+    "message": "Сборка упала: $1",
+    "description": "Заголовок уведомления об упавшей сборке (US5, FR-060)",
+    "placeholders": {
+      "1": {
+        "content": "$1"
+      }
+    }
+  },
+  "notifyBuildFailedMessage": {
+    "message": "$1 ($2)",
+    "description": "Текст уведомления об упавшей сборке: репозиторий и ветка",
+    "placeholders": {
+      "1": {
+        "content": "$1"
+      },
+      "2": {
+        "content": "$2"
+      }
+    }
+  },
+  "notifyBuildSucceededTitle": {
+    "message": "Сборка успешна: $1",
+    "description": "Заголовок уведомления об успешной сборке моего PR",
+    "placeholders": {
+      "1": {
+        "content": "$1"
+      }
+    }
+  },
+  "notifyBuildSucceededMessage": {
+    "message": "$1 ($2)",
+    "description": "Текст уведомления об успешной сборке: репозиторий и ветка",
+    "placeholders": {
+      "1": {
+        "content": "$1"
+      },
+      "2": {
+        "content": "$2"
+      }
+    }
+  },
+  "notifyReviewRequestedTitle": {
+    "message": "Запрошено ревью: $1",
+    "description": "Заголовок уведомления, когда PR попадает в группу ревью",
+    "placeholders": {
+      "1": {
+        "content": "$1"
+      }
+    }
+  },
+  "notifyReviewRequestedMessage": {
+    "message": "$1 #$2",
+    "description": "Текст уведомления о запросе ревью: репозиторий и номер PR",
+    "placeholders": {
+      "1": {
+        "content": "$1"
+      },
+      "2": {
+        "content": "$2"
+      }
+    }
+  },
+  "notifyNoteTitle": {
+    "message": "Новый комментарий: $1",
+    "description": "Заголовок уведомления о новой ветке комментариев по моему PR",
+    "placeholders": {
+      "1": {
+        "content": "$1"
+      }
+    }
+  },
+  "notifyNoteMessage": {
+    "message": "$1",
+    "description": "Текст уведомления о новой ветке комментариев",
+    "placeholders": {
+      "1": {
+        "content": "$1"
+      }
+    }
+  },
+  "optionsSectionPolling": {
+    "message": "Опрос и бейдж",
+    "description": "Настройки: заголовок секции опроса и бейджа"
+  },
+  "optionsSectionPollingDescription": {
+    "message": "Как часто опрашивать Gitea и что показывать на значке расширения",
+    "description": "Настройки: пояснение секции опроса и бейджа (T078)"
+  },
+  "optionsPollIntervalLabel": {
+    "message": "Интервал опроса, сек",
+    "description": "Настройки: подпись поля интервала опроса"
+  },
+  "optionsPollIntervalError": {
+    "message": "Интервал должен быть не меньше 30 секунд",
+    "description": "Настройки: ошибка валидации интервала опроса"
+  },
+  "optionsBadgeModeLabel": {
+    "message": "Режим бейджа",
+    "description": "Настройки: подпись выбора режима бейджа"
+  },
+  "optionsBadgeMode_reviews": {
+    "message": "PR на моё ревью",
+    "description": "Настройки: режим бейджа — ревью"
+  },
+  "optionsBadgeMode_builds": {
+    "message": "Активные сборки",
+    "description": "Настройки: режим бейджа — сборки"
+  },
+  "optionsBadgeMode_sum": {
+    "message": "Сумма",
+    "description": "Настройки: режим бейджа — сумма"
+  },
+  "optionsRecentWindowLabel": {
+    "message": "Окно «недавних», часов",
+    "description": "Настройки: подпись поля окна недавних сборок"
+  },
+  "optionsRecentWindowError": {
+    "message": "Окно «недавних» — от 1 до 168 часов",
+    "description": "Настройки: ошибка валидации окна недавних"
+  },
+  "optionsRedBadgeWindowLabel": {
+    "message": "Окно красного бейджа, минут",
+    "description": "Настройки: подпись поля окна красного бейджа"
+  },
+  "optionsRedBadgeWindowError": {
+    "message": "Окно красного бейджа — от 5 до 1440 минут",
+    "description": "Настройки: ошибка валидации окна красного бейджа"
+  },
+  "optionsShowOtherPrsLabel": {
+    "message": "Показывать группу «Остальные открытые»",
+    "description": "Настройки: переключатель видимости группы прочих PR"
+  },
+  "optionsSectionNotifications": {
+    "message": "Уведомления",
+    "description": "Настройки: заголовок секции уведомлений"
+  },
+  "optionsSectionNotificationsDescription": {
+    "message": "Какие события системных уведомлений показывать браузером",
+    "description": "Настройки: пояснение секции уведомлений (T078)"
+  },
+  "optionsNotifyBuildFailedLabel": {
+    "message": "Сборка упала",
+    "description": "Настройки: подпись выбора охвата уведомления о падении сборки"
+  },
+  "optionsNotifyBuildFailed_off": {
+    "message": "Выключено",
+    "description": "Настройки: охват уведомления о падении — выключено"
+  },
+  "optionsNotifyBuildFailed_myPrs": {
+    "message": "Мои PR",
+    "description": "Настройки: охват уведомления о падении — мои PR"
+  },
+  "optionsNotifyBuildFailed_myPushes": {
+    "message": "Мои пуши",
+    "description": "Настройки: охват уведомления о падении — мои пуши"
+  },
+  "optionsNotifyBuildFailed_mine": {
+    "message": "Мои PR и пуши",
+    "description": "Настройки: охват уведомления о падении — мои PR и пуши"
+  },
+  "optionsNotifyBuildFailed_all": {
+    "message": "Все отслеживаемые",
+    "description": "Настройки: охват уведомления о падении — все отслеживаемые"
+  },
+  "optionsNotifyBuildSucceededLabel": {
+    "message": "Успешная сборка по моему PR",
+    "description": "Настройки: переключатель уведомления об успешной сборке"
+  },
+  "optionsNotifyReviewRequestedLabel": {
+    "message": "Меня назначили ревьюером",
+    "description": "Настройки: переключатель уведомления о запросе ревью"
+  },
+  "optionsNotifyCommentsLabel": {
+    "message": "Новый комментарий или ревью в моём PR",
+    "description": "Настройки: переключатель уведомления о комментариях"
+  },
+  "optionsSectionScope": {
+    "message": "Охват",
+    "description": "Настройки: заголовок секции охвата"
+  },
+  "optionsSectionScopeDescription": {
+    "message": "Какие организации и репозитории учитывать при опросе",
+    "description": "Настройки: пояснение секции охвата (T078)"
+  },
+  "optionsScopeOrgsTitle": {
+    "message": "Организации",
+    "description": "Настройки: заголовок списка организаций"
+  },
+  "optionsScopeNoOrgs": {
+    "message": "Организации не найдены",
+    "description": "Настройки: организации отсутствуют"
+  },
+  "optionsScopeExcludeReposTitle": {
+    "message": "Исключённые репозитории",
+    "description": "Настройки: заголовок списка исключённых репозиториев"
+  },
+  "optionsScopeIncludeReposTitle": {
+    "message": "Добавленные репозитории вне организаций",
+    "description": "Настройки: заголовок списка добавленных репозиториев"
+  },
+  "optionsScopePinnedReposTitle": {
+    "message": "Закреплённые репозитории",
+    "description": "Настройки: заголовок списка закреплённых репозиториев"
+  },
+  "optionsScopeNoPins": {
+    "message": "Нет закреплённых репозиториев",
+    "description": "Настройки: закреплённые репозитории отсутствуют"
+  },
+  "optionsScopeAddRepoPlaceholder": {
+    "message": "владелец/репозиторий",
+    "description": "Настройки: подсказка поля добавления репозитория"
+  },
+  "optionsScopeAddButton_exclude": {
+    "message": "Исключить",
+    "description": "Настройки: кнопка добавления в исключённые"
+  },
+  "optionsScopeAddButton_include": {
+    "message": "Добавить",
+    "description": "Настройки: кнопка добавления в список включённых"
+  },
+  "optionsScopeInvalidRepo": {
+    "message": "Формат: владелец/репозиторий",
+    "description": "Настройки: ошибка валидации формата репозитория"
+  },
+  "optionsScopeRemoveButton": {
+    "message": "Удалить",
+    "description": "Настройки: кнопка удаления репозитория из списка"
+  },
+  "optionsScopeUnpinButton": {
+    "message": "Открепить",
+    "description": "Настройки: кнопка открепления репозитория"
+  },
+  "optionsScopeRepoModeCounter": {
+    "message": "Опрос по репозиториям: $1 из $2",
+    "description": "Настройки: счётчик репозиториев в запасном режиме опроса",
+    "placeholders": {
+      "1": {
+        "content": "$1"
+      },
+      "2": {
+        "content": "$2"
+      }
+    }
+  },
+  "optionsScopeRepoModeWarning": {
+    "message": "Превышен лимит репозиториев — возможна повышенная нагрузка",
+    "description": "Настройки: предупреждение о превышении лимита репозиториев"
+  },
+  "popupSettingsButton": {
+    "message": "Настройки",
+    "description": "Окно: кнопка-значок в заголовке, открывающая страницу настроек"
+  },
+  "popupOpenInTab": {
+    "message": "Открыть во вкладке",
+    "description": "Окно: кнопка-значок в заголовке, открывающая дашборд во вкладке (T009)"
+  },
+  "dashboardTitle": {
+    "message": "Дашборд Gitea",
+    "description": "Страница дашборда во вкладке: заголовок-заглушка (T002)"
+  },
+  "dashboardUpdatedAt": {
+    "message": "Обновлено $1",
+    "description": "Страница дашборда: приглушённый текст времени последнего обновления данных в шапке (T012)",
+    "placeholders": {
+      "1": {
+        "content": "$1"
+      }
+    }
+  },
+  "prsColCi": {
+    "message": "CI",
+    "description": "Таблица PR: заголовок колонки статуса CI (T017)"
+  },
+  "prsColTitle": {
+    "message": "Заголовок",
+    "description": "Таблица PR: заголовок колонки заголовка PR (T017)"
+  },
+  "prsColRepo": {
+    "message": "Репозиторий",
+    "description": "Таблица PR: заголовок колонки репозиторий #номер (T017)"
+  },
+  "prsColAuthor": {
+    "message": "Автор",
+    "description": "Таблица PR: заголовок колонки автора (T017)"
+  },
+  "prsColUpdated": {
+    "message": "Обновлён",
+    "description": "Таблица PR: заголовок колонки времени обновления (T017)"
+  },
+  "prsFacetRepo": {
+    "message": "Репозиторий",
+    "description": "Таблица PR: заголовок фасетного фильтра по репозиторию (T017)"
+  },
+  "prsFacetAuthor": {
+    "message": "Автор",
+    "description": "Таблица PR: заголовок фасетного фильтра по автору (T017)"
+  },
+  "prsFacetCi": {
+    "message": "CI",
+    "description": "Таблица PR: заголовок фасетного фильтра по статусу CI (T017)"
+  },
+  "prsFilterSearchPlaceholder": {
+    "message": "Поиск…",
+    "description": "Таблица PR: подсказка в поле поиска (T017)"
+  },
+  "prsFilterNoResults": {
+    "message": "Ничего не найдено",
+    "description": "Таблица PR: пустой список в фасетном Command-фильтре (T017)"
+  },
+  "prsFiltersReset": {
+    "message": "Сбросить",
+    "description": "Таблица PR: кнопка сброса всех фильтров (T017)"
+  },
+  "prsFiltersCount": {
+    "message": "$1 из $2",
+    "description": "Таблица PR: счётчик «показано из всего» в панели фильтров (T017)",
+    "placeholders": {
+      "1": {
+        "content": "$1"
+      },
+      "2": {
+        "content": "$2"
+      }
+    }
+  },
+  "prsTableNoResults": {
+    "message": "Ничего не найдено",
+    "description": "Таблица PR: пустой результат фильтрации (T017)"
+  },
+  "prsDraftFilterLabel": {
+    "message": "Черновики",
+    "description": "Таблица PR: подпись выпадающего фильтра черновиков (T017)"
+  },
+  "prsDraftFilterAll": {
+    "message": "Все",
+    "description": "Таблица PR: вариант фильтра черновиков — все (T017)"
+  },
+  "prsDraftFilterOnly": {
+    "message": "Только черновики",
+    "description": "Таблица PR: вариант фильтра черновиков — только черновики (T017)"
+  },
+  "prsDraftFilterExclude": {
+    "message": "Без черновиков",
+    "description": "Таблица PR: вариант фильтра черновиков — без черновиков (T017)"
+  },
+  "prsConflictFilterLabel": {
+    "message": "Только с конфликтом",
+    "description": "Таблица PR: переключатель «только с конфликтом» (T017)"
+  },
+  "prsViewTable": {
+    "message": "Таблица",
+    "description": "Раздел PR: переключатель вида — таблица (T017)"
+  },
+  "historyPeriodLabel": {
+    "message": "Период истории сборок",
+    "description": "История сборок: подпись переключателя периода (T023)"
+  },
+  "historyPeriodToday": {
+    "message": "Сегодня",
+    "description": "История сборок: период — с полуночи по Алма-Ате (T046)"
+  },
+  "historyClear": {
+    "message": "Очистить",
+    "description": "История сборок: сбросить все фильтры (T047)"
+  },
+  "historyPeriod24h": {
+    "message": "24 ч",
+    "description": "История сборок: период — 24 часа (T023)"
+  },
+  "historyPeriod7d": {
+    "message": "7 дн",
+    "description": "История сборок: период — 7 дней (T023)"
+  },
+  "historyPeriod30d": {
+    "message": "30 дн",
+    "description": "История сборок: период — 30 дней (T023)"
+  },
+  "historyFacetRepo": {
+    "message": "Репозиторий",
+    "description": "История сборок: фасетный фильтр — репозиторий (T023)"
+  },
+  "historyFacetWorkflow": {
+    "message": "Workflow",
+    "description": "История сборок: фасетный фильтр — workflow (T023)"
+  },
+  "historyFacetBranch": {
+    "message": "Ветка",
+    "description": "История сборок: фасетный фильтр — ветка (T023)"
+  },
+  "historyFacetEvent": {
+    "message": "Событие",
+    "description": "История сборок: фасетный фильтр — событие (T023)"
+  },
+  "historyFacetResult": {
+    "message": "Итог",
+    "description": "История сборок: фасетный фильтр — итог (T023)"
+  },
+  "historyMineLabel": {
+    "message": "Только мои",
+    "description": "История сборок: переключатель «только мои» (T023)"
+  },
+  "historyColWorkflow": {
+    "message": "Workflow",
+    "description": "История сборок: колонка — workflow (T023)"
+  },
+  "historyColRepo": {
+    "message": "Репозиторий",
+    "description": "История сборок: колонка — репозиторий (T023)"
+  },
+  "historyColBranch": {
+    "message": "Ветка",
+    "description": "История сборок: колонка — ветка (T023)"
+  },
+  "historyColEvent": {
+    "message": "Событие",
+    "description": "История сборок: колонка — событие (T023)"
+  },
+  "historyColActor": {
+    "message": "Кто запустил",
+    "description": "История сборок: колонка — автор запуска (T023)"
+  },
+  "historyColStarted": {
+    "message": "Начат",
+    "description": "История сборок: колонка — время начала, сортируемая (T023)"
+  },
+  "historyStartedQueued": {
+    "message": "в очереди",
+    "description": "История сборок: колонка «Начат» для waiting/blocked запуска без времени начала (T057)"
+  },
+  "historyColDuration": {
+    "message": "Длительность",
+    "description": "История сборок: колонка — длительность, сортируемая (T023)"
+  },
+  "historyStatTotal": {
+    "message": "Запусков",
+    "description": "История сборок: карточка статистики — всего запусков (T023)"
+  },
+  "historyStatFailureRate": {
+    "message": "Доля падений",
+    "description": "История сборок: карточка статистики — доля упавших (T023)"
+  },
+  "historyStatAvgDuration": {
+    "message": "Средняя длительность",
+    "description": "История сборок: карточка статистики — средняя длительность (T023)"
+  },
+  "historyStatMedianDuration": {
+    "message": "Медианная длительность",
+    "description": "История сборок: карточка статистики — медианная длительность (T023)"
+  },
+  "historyByWorkflowTotal": {
+    "message": "Запусков",
+    "description": "История сборок: разбивка по workflow — число запусков (T023)"
+  },
+  "historyByWorkflowFailed": {
+    "message": "Падений",
+    "description": "История сборок: разбивка по workflow — число падений (T023)"
+  },
+  "historyByWorkflowAvg": {
+    "message": "Средняя",
+    "description": "История сборок: разбивка по workflow — средняя длительность (T023)"
+  },
+  "historyShowMore": {
+    "message": "Показать ещё",
+    "description": "История сборок: кнопка постраничной подгрузки (T023)"
+  },
+  "historyCoverageNote": {
+    "message": "Период покрыт до $1",
+    "description": "История сборок: пометка неполного покрытия периода (T023)",
+    "placeholders": {
+      "1": {
+        "content": "$1"
+      }
+    }
+  },
+  "historySourceErrors": {
+    "message": "Не удалось загрузить: $1",
+    "description": "История сборок: список источников, которые не удалось загрузить (T023)",
+    "placeholders": {
+      "1": {
+        "content": "$1"
+      }
+    }
+  },
+  "historyLoadError": {
+    "message": "Не удалось загрузить историю сборок",
+    "description": "История сборок: загрузка (или «показать ещё») завершилась не-auth ошибкой (T029)"
+  },
+  "historyRetry": {
+    "message": "Повторить",
+    "description": "История сборок: кнопка повтора загрузки после ошибки (T029)"
+  },
+  "buildsViewHistory": {
+    "message": "История",
+    "description": "Раздел «Сборки»: переключатель вида — история (T023)"
+  },
+  "historyColStage": {
+    "message": "Этап",
+    "description": "История сборок: колонка — текущий job/шаг выполняющегося запуска (T035, US6)"
+  },
+  "buildsStageToggle": {
+    "message": "Подробности запуска",
+    "description": "История сборок: aria-label кнопки-шеврона, раскрывающей jobs/шаги строки (T035, US6)"
+  },
+  "buildsStageUnavailable": {
+    "message": "этап недоступен",
+    "description": "Строка запуска/раздел «Сборки»: не удалось получить jobs/шаги — остальная таблица работает (T035, US6 scenario 4)"
+  },
+  "buildsStageLoading": {
+    "message": "Загрузка…",
+    "description": "Раскрытая строка запуска: jobs/шаги ещё не получены (T035, US6)"
+  },
+  "historyTabBuilds": {
+    "message": "Сборки",
+    "description": "История: вкладка релизных и обычных сборок (test/main/release/*), открыта по умолчанию (T053, FR-125)"
+  },
+  "historyTabAll": {
+    "message": "Все запуски",
+    "description": "История: вкладка со всеми запусками, включая проверки PR и feature-ветки (T053, FR-125)"
+  },
+  "historyKindRelease": {
+    "message": "релиз",
+    "description": "История: тег типа запуска рядом с версией для релизных запусков (T053)"
+  },
+  "historyTabsLabel": {
+    "message": "Тип запусков",
+    "description": "История: aria-label переключателя вкладок Сборки / Все запуски (T053)"
+  },
+  "historyStatsToggle": {
+    "message": "Статистика",
+    "description": "История сборок: заголовок сворачиваемой панели статистики (карточки + «По workflow») (T042)"
+  },
+  "historyStatsSummary": {
+    "message": "$1 запусков · $2% падений",
+    "description": "История сборок: однострочная сводка рядом со свёрнутым заголовком статистики (T042)",
+    "placeholders": {
+      "1": { "content": "$1" },
+      "2": { "content": "$2" }
+    }
+  },
+  "paginationPrev": { "message": "Назад" },
+  "paginationNext": { "message": "Вперёд" },
+  "paginationPageSize": { "message": "На странице" },
+  "paginationRange": {
+    "message": "$1–$2 из $3",
+    "placeholders": {
+      "1": { "content": "$1" },
+      "2": { "content": "$2" },
+      "3": { "content": "$3" }
+    }
+  },
+  "historyDiagToggle": {"message": "Диагностика", "description": "История сборок: заголовок свёрнутой панели диагностики загрузчика (T055)"},
+  "historyDiagSource": {"message": "Источник", "description": "Диагностика истории: колонка ключа источника (T055)"},
+  "historyDiagRequests": {"message": "Запросов", "description": "Диагностика истории: запросов к источнику в этом вызове (T055)"},
+  "historyDiagPages": {"message": "Страниц", "description": "Диагностика истории: страниц пройдено от начала (T055)"},
+  "historyDiagRuns": {"message": "В кеше", "description": "Диагностика истории: запусков источника в кеше (T055)"},
+  "historyDiagTotal": {"message": "Всего на сервере", "description": "Диагностика истории: total_count последней страницы (T055)"},
+  "historyDiagOldest": {"message": "Самый старый startedAt", "description": "Диагностика истории: самый старый запуск источника (T055)"},
+  "historyDiagExhausted": {"message": "Страницы кончились", "description": "Диагностика истории: exhausted (T055)"},
+  "historyDiagError": {"message": "Ошибка", "description": "Диагностика истории: ошибка источника (T055)"},
+  "historyDiagYes": {"message": "да", "description": "Диагностика истории: да (T055)"},
+  "historyDiagNo": {"message": "нет", "description": "Диагностика истории: нет (T055)"},
+  "historyDiagSummary": {"message": "coveredUntil $1 · hasMore $2 · всего запросов $3 · начало периода $4 · limit $5", "description": "Диагностика истории: сводка вызова (T055)", "placeholders": {"1": {"content": "$1"}, "2": {"content": "$2"}, "3": {"content": "$3"}, "4": {"content": "$4"}, "5": {"content": "$5"}}}
+}

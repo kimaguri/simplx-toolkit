@@ -1,0 +1,28 @@
+[
+  {
+    "id": 10,
+    "name": "acme",
+    "username": "acme",
+    "full_name": "ACME Corp",
+    "avatar_url": "https://git.example.test/avatars/org/acme",
+    "description": "",
+    "website": "",
+    "location": "",
+    "visibility": "public",
+    "repo_admin_change_team_access": true,
+    "email": ""
+  },
+  {
+    "id": 11,
+    "name": "umbrella",
+    "username": "umbrella",
+    "full_name": "Umbrella Inc",
+    "avatar_url": "https://git.example.test/avatars/org/umbrella",
+    "description": "",
+    "website": "",
+    "location": "",
+    "visibility": "public",
+    "repo_admin_change_team_access": true,
+    "email": ""
+  }
+]

@@ -1,0 +1,5 @@
+allowBuilds:
+  esbuild: true
+  spawn-sync: true
+overrides:
+  '@vitejs/plugin-react': ^5
