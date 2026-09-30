@@ -16,6 +16,7 @@ type Route struct {
 	HostMatch  string
 	Upstream   string
 	HostHeader string
+	TLS        bool
 }
 
 // ProxyClient is the minimal surface devdash needs against the shared Caddy
@@ -60,36 +61,47 @@ func BuildRoute(slug, service, domainSuffix string, localPort int, remoteUpstrea
 		}
 	}
 
-	upstream, hostHeader := parseRemoteUpstream(remoteUpstream)
+	upstream, hostHeader, isTLS := parseRemoteUpstream(remoteUpstream)
 
 	return Route{
 		ID:         id,
 		HostMatch:  hostMatch,
 		Upstream:   upstream,
 		HostHeader: hostHeader,
+		TLS:        isTLS,
 	}
 }
 
 // parseRemoteUpstream turns a remote upstream URL into a Caddy "host:port"
-// dial address plus the bare host to present via a Host header rewrite.
-func parseRemoteUpstream(remoteUpstream string) (upstream, hostHeader string) {
+// dial address plus the bare host to present via a Host header rewrite, plus
+// whether the upstream's original scheme was https (so callers know to make
+// Caddy perform a TLS handshake when dialing it — Caddy's reverse_proxy
+// defaults to plain HTTP regardless of port otherwise).
+func parseRemoteUpstream(remoteUpstream string) (upstream, hostHeader string, isTLS bool) {
 	u, err := url.Parse(remoteUpstream)
 	if err != nil || u.Host == "" {
 		// Not a well-formed URL; treat the raw value as a host[:port].
+		// Infer TLS from whichever scheme prefix was actually present;
+		// real project configs are always https://*-test.sadmin.app, so
+		// default to true when neither prefix matched.
+		if strings.HasPrefix(remoteUpstream, "http://") {
+			host := strings.TrimPrefix(remoteUpstream, "http://")
+			return host, host, false
+		}
 		host := strings.TrimSuffix(strings.TrimPrefix(remoteUpstream, "https://"), "/")
-		host = strings.TrimPrefix(host, "http://")
-		return host, host
+		return host, host, true
 	}
 
 	host := u.Hostname()
 	port := u.Port()
+	isTLS = u.Scheme == "https"
 	if port == "" {
 		port = schemeDefaultPort[u.Scheme]
 	}
 	if port == "" {
-		return host, host
+		return host, host, isTLS
 	}
-	return net.JoinHostPort(host, port), host
+	return net.JoinHostPort(host, port), host, isTLS
 }
 
 // CaddyJSON renders the Caddy admin-API route object for r: a Host match
@@ -112,6 +124,13 @@ func (r Route) CaddyJSON() ([]byte, error) {
 					"Host": []string{r.HostHeader},
 				},
 			},
+		}
+	}
+
+	if r.TLS {
+		handler["transport"] = map[string]any{
+			"protocol": "http",
+			"tls":      map[string]any{},
 		}
 	}
 

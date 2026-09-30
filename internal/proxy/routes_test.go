@@ -21,6 +21,9 @@ func TestBuildRoute_Local(t *testing.T) {
 	if r.HostHeader != "" {
 		t.Errorf("HostHeader = %q, want empty", r.HostHeader)
 	}
+	if r.TLS != false {
+		t.Errorf("TLS = %v, want false", r.TLS)
+	}
 }
 
 func TestBuildRoute_Remote_HTTPS(t *testing.T) {
@@ -38,6 +41,9 @@ func TestBuildRoute_Remote_HTTPS(t *testing.T) {
 	if r.HostHeader != "core-test.sadmin.app" {
 		t.Errorf("HostHeader = %q, want %q", r.HostHeader, "core-test.sadmin.app")
 	}
+	if r.TLS != true {
+		t.Errorf("TLS = %v, want true", r.TLS)
+	}
 }
 
 func TestBuildRoute_Remote_HTTP(t *testing.T) {
@@ -48,6 +54,9 @@ func TestBuildRoute_Remote_HTTP(t *testing.T) {
 	}
 	if r.HostHeader != "core-test.sadmin.app" {
 		t.Errorf("HostHeader = %q, want %q", r.HostHeader, "core-test.sadmin.app")
+	}
+	if r.TLS != false {
+		t.Errorf("TLS = %v, want false", r.TLS)
 	}
 }
 
@@ -88,6 +97,40 @@ func TestRoute_CaddyJSON_Local(t *testing.T) {
 	}
 	if strings.Contains(s, "headers") {
 		t.Errorf("local route should not contain a Host header rewrite, got: %s", s)
+	}
+	if strings.Contains(s, "transport") {
+		t.Errorf("local route should not contain a transport block, got: %s", s)
+	}
+}
+
+func TestRoute_CaddyJSON_Remote_HTTPS_HasTLSTransport(t *testing.T) {
+	r := BuildRoute("taska", "core", "localhost", 0, "https://core-test.sadmin.app")
+
+	raw, err := r.CaddyJSON()
+	if err != nil {
+		t.Fatalf("CaddyJSON error: %v", err)
+	}
+
+	s := string(raw)
+	if !strings.Contains(s, "\"transport\"") {
+		t.Errorf("https remote route missing transport block, got: %s", s)
+	}
+	if !strings.Contains(s, "\"tls\"") {
+		t.Errorf("https remote route transport missing tls, got: %s", s)
+	}
+}
+
+func TestRoute_CaddyJSON_Remote_HTTP_NoTLSTransport(t *testing.T) {
+	r := BuildRoute("taska", "core", "localhost", 0, "http://core-test.sadmin.app")
+
+	raw, err := r.CaddyJSON()
+	if err != nil {
+		t.Fatalf("CaddyJSON error: %v", err)
+	}
+
+	s := string(raw)
+	if strings.Contains(s, "transport") {
+		t.Errorf("http remote route should not contain a transport block, got: %s", s)
 	}
 }
 
